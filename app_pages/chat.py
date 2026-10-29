@@ -36,8 +36,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 # Layout-only CSS for the Claude-style look: hide Streamlit's Deploy chrome,
 # center the greeting, brand the sidebar wordmark, and keep the chat column
 # narrow (the entry point uses the wide layout for the dashboard pages).
-from ui_theme import inject_theme
-inject_theme(760)
 
 try:
     import jarvis.agent as agent  # builds the graph and opens the memory database (once per process)

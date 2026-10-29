@@ -4,8 +4,10 @@ ui.py - entry point of the multi-page app.
     streamlit run ui.py
 """
 import os
-from datetime import date, datetime, timedelta
 import re
+import sys
+from datetime import date, datetime, timedelta
+from pathlib import Path
 
 import streamlit as st
 from ui_theme import inject_theme
@@ -47,18 +49,20 @@ nav = st.navigation(
 )
 
 # --------------------------------------------------------------------------
-# sidebar helpers (import from jarvis.conversations, not chat.py)
+# sidebar helpers (conversation data lives in jarvis.conversations)
 # --------------------------------------------------------------------------
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 try:
-    from jarvis.conversations import recent_conversations, search_conversations
-    from jarvis.tasks import latest_usage
-    from jarvis import agent
-except Exception as e:
-    import logging
-    logging.getLogger("jarvis.ui").warning("sidebar imports failed: %s", e)
+    from jarvis.conversations import recent_conversations, search_conversations  # noqa: E402
+    from jarvis.tasks import latest_usage  # noqa: E402
+    from jarvis import agent  # noqa: E402
+    from jarvis.app_briefing import get_setting, set_setting  # noqa: E402
+except Exception as exc:  # log and show a small sidebar warning, never crash
+    import logging  # noqa: PLC0415
+
+    logging.getLogger("jarvis.ui").warning("sidebar imports failed: %s", exc)
     recent_conversations = None
     search_conversations = None
     latest_usage = None
@@ -69,7 +73,7 @@ _THREAD_RE = re.compile(r"^ui-(\d{8})-(\d{6})$")
 
 
 def _render_recents(tid: str) -> None:
-    """Render recents grouped Today / Yesterday / Earlier using regex on thread id."""
+    """Render recents grouped Today / Yesterday / Earlier via regex on thread id."""
     if not recent_conversations:
         return
     recents = recent_conversations()
@@ -107,6 +111,23 @@ def _render_recents(tid: str) -> None:
     _group("Today", today_r)
     _group("Yesterday", yesterday_r)
     _group("Earlier", earlier_r)
+
+
+@st.cache_data(ttl=10)
+def _today_token_usage() -> int:
+    """Sum of prompt + completion tokens used today, from one SQL query."""
+    if latest_usage is None:
+        return 0
+    try:
+        rows = latest_usage(limit=10000)
+    except Exception:
+        return 0
+    today_prefix = date.today().isoformat()
+    return sum(
+        (r.get("prompt_tokens") or 0) + (r.get("completion_tokens") or 0)
+        for r in rows
+        if str(r.get("ts", "")).startswith(today_prefix)
+    )
 
 
 # --------------------------------------------------------------------------
@@ -177,24 +198,43 @@ with st.sidebar:
             st.toast("Stopped", icon="🔇")
 
 
-@st.cache_data(ttl=10)
-def _today_token_usage() -> int:
-    """Sum of prompt + completion tokens used today, from the usage table."""
-    if latest_usage is None:
-        return 0
-    try:
-        rows = latest_usage(limit=10000)
-    except Exception:
-        return 0
-    today_prefix = date.today().isoformat()
-    return sum(
-        (r.get("prompt_tokens") or 0) + (r.get("completion_tokens") or 0)
-        for r in rows
-        if str(r.get("ts", "")).startswith(today_prefix)
-    )
+# --------------------------------------------------------------------------
+# reminders fragment
+# --------------------------------------------------------------------------
+
+@st.fragment(run_every=15)
+def reminder_watch() -> None:
+    due = app_reminders.due_now()
+    seen = st.session_state.setdefault("reminders_seen", set())
+    for r in due:
+        k = app_reminders._key(r)
+        if k not in seen:
+            seen.add(k)
+            st.toast(f"{r['title']} - it's time", icon="\U0001F514")
+    if due:
+        acted = None
+        with st.container(border=True):
+            st.markdown("**\U0001F514 Due now**")
+            for r in due:
+                c0, c1, c2, c3 = st.columns([8, 2, 2, 2], vertical_alignment="center")
+                c0.markdown(f"{r['title']} &nbsp; `{r['due_time']}`")
+                if c1.button("\u2705 Done", key=f"rem_done_{r['id']}",
+                             help="Mark done"):
+                    app_reminders.mark_done(r["id"])
+                    acted = True
+                if c2.button("+10 min", key=f"rem_snooze10_{r['id']}",
+                             help="Snooze by 10 minutes"):
+                    app_reminders.snooze(r["id"], 10)
+                    acted = True
+                if c3.button("+1 h", key=f"rem_snooze60_{r['id']}",
+                             help="Snooze by an hour"):
+                    app_reminders.snooze(r["id"], 60)
+                    acted = True
+        if acted:
+            st.cache_data.clear()
+            st.rerun()
 
 
 reminder_watch()
-
 
 nav.run()

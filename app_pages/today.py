@@ -8,8 +8,6 @@ import streamlit as st
 from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from ui_theme import inject_theme
-inject_theme(900)
 st.title(":material/calendar_today: Today")
 st.caption(f"{date.today():%A, %d %B %Y}")
 

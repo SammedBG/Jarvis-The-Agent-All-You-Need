@@ -10,8 +10,6 @@ import streamlit as st
 from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from ui_theme import inject_theme
-inject_theme(860)
 st.title(":material/settings: Settings")
 st.caption("Tuning for JARVIS's brain. None of these read or write API keys.")
 
@@ -36,8 +34,8 @@ with st.container(border=True):
 # ---- Voice ---------------------------------------------------------------
 with st.container(border=True):
     st.subheader("Voice")
-    cur_voice = ab.get_setting("voice_replies", "0") == "1"
-    v = st.checkbox("Read replies aloud (chat)", value=cur_voice, key="set_voice_replies")
+    cur_voice = ab.get_setting("voice_replies", "0") == "1"  # controlled by sidebar toggle (single ownership)
+    v = cur_voice
     cur_ann = ab.get_setting("voice_announcements", "1") == "1"
     a = st.checkbox("Speak reminders & briefing aloud (system)", value=cur_ann, key="set_voice_announce")
     cur_wake = ab.get_setting("wake_word_enabled", "1") == "1"
@@ -128,7 +126,6 @@ if st.button("Save settings", type="primary", icon=":material/save:", key="set_s
         ab.set_setting("model_simple", ms.strip())
         ab.set_setting("groq_daily_token_cap", str(int(cap)))
         ab.set_setting("fast_path_aliases", alias_text.strip())
-        ab.set_setting("voice_replies", "1" if v else "0")
         ab.set_setting("voice_announcements", "1" if a else "0")
         ab.set_setting("wake_word_enabled", "1" if w else "0")
         st.toast("Settings saved.", icon="\U0001f527")

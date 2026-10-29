@@ -286,11 +286,16 @@ def get_session_from_request(request: Request) -> Optional[Dict[str, Any]]:
         conn.commit()
     finally:
         conn.close()
-    return {
+    session = {
         "id": row["user_id"],
         "username": row["username"],
         "csrf_token": row["csrf_token"],
     }
+    try:
+        request.state.session = session
+    except Exception:
+        pass
+    return session
 
 
 def require_user(request: Request) -> Dict[str, Any]:

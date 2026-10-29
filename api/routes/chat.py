@@ -5,13 +5,15 @@ import asyncio
 import json
 import time
 import uuid
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Deque, Dict, Optional
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sse_starlette import EventSourceResponse
-from starlette.status import HTTP_400_BAD_REQUEST, HTTP_409_CONFLICT
+from starlette.status import HTTP_409_CONFLICT
 
 from api.deps import require_user  # noqa: E402
 
@@ -52,7 +54,7 @@ async def chat(payload: ChatPayload, request: Request, user: dict = Depends(requ
         _cancelled.discard(thread_id)
 
     turn_start = time.monotonic()
-    pending_calls: Deque[Dict[str, Any]] = Deque()
+    pending_calls = deque()
     emitted_any_text = False
 
     async def event_generator():
@@ -115,11 +117,15 @@ async def chat(payload: ChatPayload, request: Request, user: dict = Depends(requ
                     name = ev.get("name", "")
                     if pending_calls:
                         pending_calls.popleft()
+                    txt = ev.get("text", "") or ""
+                    tstatus = "ok"
+                    if isinstance(txt, str) and txt.strip().lower().startswith("error"):
+                        tstatus = "error"
                     yield _sse(
                         {
                             "type": "tool_end",
                             "name": name,
-                            "status": "ok",
+                            "status": tstatus,
                             "ms": _elapsed_ms(turn_start),
                         }
                     )
@@ -142,9 +148,27 @@ async def chat(payload: ChatPayload, request: Request, user: dict = Depends(requ
                         emitted_any_text = True
                         yield _sse({"type": "token", "text": text})
                 elif kind == "error":
-                    msg = ev.get("message") or "Something went wrong."
                     if ev.get("kind") == "rate_limit":
-                        msg = "Daily limit reached, resets shortly."
+                        retry = ev.get("retry_after")
+                        if isinstance(retry, (int, float)) and retry and retry > 0:
+                            reset = datetime.now(timezone.utc) + timedelta(seconds=int(retry))
+                            msg = "Daily limit reached, resets at %s." % reset.astimezone().strftime("%H:%M")
+                        else:
+                            msg = "Daily limit reached, resets shortly."
+                    else:
+                        msg = "Something went wrong. Please retry."
+                        # log details to Activity; never return raw error to client
+                        try:
+                            from jarvis.tasks import log_tool_activity  # noqa: PLC0415
+
+                            log_tool_activity(
+                                "chat",
+                                {"thread_id": thread_id},
+                                ev.get("message", msg),
+                                status="error",
+                            )
+                        except Exception:
+                            pass
                     yield _sse({"type": "error", "message": msg})
                 # discard events are intentionally ignored
             # stream complete: usage + done
@@ -165,6 +189,13 @@ async def chat(payload: ChatPayload, request: Request, user: dict = Depends(requ
     return EventSourceResponse(event_generator())
 
 
+class ApprovePayload(BaseModel):
+    id: Any = None
+    approved: bool
+    feedback: Optional[str] = None
+    thread_id: str | None = None
+
+
 @router.post("/chat/stop")
 def chat_stop(request: Request, user: dict = Depends(require_user), thread_id: str | None = None):  # type: ignore[arg-type]
     """Cancel the running turn for a thread."""
@@ -174,10 +205,38 @@ def chat_stop(request: Request, user: dict = Depends(require_user), thread_id: s
     return {"ok": True}
 
 
+@router.post("/approve")
+def approve(request: Request, payload: ApprovePayload, user: dict = Depends(require_user)):  # type: ignore[arg-type]
+    """Resume the paused graph with the exact pending tool call."""
+    require_csrf(request)
+    thread_id = (payload.thread_id or request.query_params.get("thread_id") or "ui-main").strip()
+    # If pending approval is identified by id vs the graph's own pending,
+    # the resumed action is always the server-side pending one, never client args.
+    resume_obj: Dict[str, Any]
+    if payload.approved:
+        resume_obj = {"approved": True}
+    else:
+        resume_obj = {"approved": False, "feedback": payload.feedback or ""}
+    try:
+        from jarvis.agent import ask_agent  # noqa: PLC0415
+
+        result = ask_agent("", thread_id=thread_id, resume=resume_obj)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail="approval failed")
+    return {
+        "ok": True,
+        "reply": result.get("reply"),
+        "tools": result.get("tools"),
+        "error": result.get("error"),
+        "pending": result.get("pending"),
+    }
+
+
+
 # ---- helpers ----
 
-def _sse(payload: Dict[str, Any]) -> str:
-    return f"data: {json.dumps(payload, default=str)}\n\n"
+def _sse(payload: Dict[str, Any]) -> Dict[str, str]:
+    return {"data": json.dumps(payload, default=str)}
 
 
 def _elapsed_ms(start: float) -> int:

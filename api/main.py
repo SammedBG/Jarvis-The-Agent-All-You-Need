@@ -92,7 +92,7 @@ def get_allowed_origins() -> list[str]:
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=get_allowed_origins,
+    allow_origins=get_allowed_origins(),
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["content-type", "x-csrf-token", "authorization"],
@@ -101,15 +101,15 @@ app.add_middleware(
 
 # ---- import routers (after app exists) ----
 from api.auth import router as auth_router  # noqa: E402
-from api.routes import chat as chat_router  # noqa: E402
-from api.routes import conversations as conversations_router  # noqa: E402
-from api.routes import tasks as tasks_router  # noqa: E402
-from api.routes import memory as memory_router  # noqa: E402
-from api.routes import activity as activity_router  # noqa: E402
-from api.routes import usage as usage_router  # noqa: E402
-from api.routes import settings as settings_router  # noqa: E402
-from api.routes import briefing as briefing_router  # noqa: E402
-from api.routes import voice as voice_router  # noqa: E402
+from api.routes.chat import router as chat_router  # noqa: E402
+from api.routes.conversations import router as conversations_router  # noqa: E402
+from api.routes.tasks import router as tasks_router  # noqa: E402
+from api.routes.memory import router as memory_router  # noqa: E402
+from api.routes.activity import router as activity_router  # noqa: E402
+from api.routes.usage import router as usage_router  # noqa: E402
+from api.routes.settings import router as settings_router  # noqa: E402
+from api.routes.briefing import router as briefing_router  # noqa: E402
+from api.routes.voice import router as voice_router  # noqa: E402
 
 app.include_router(auth_router, prefix="/api/auth")
 app.include_router(chat_router, prefix="/api")
@@ -121,6 +121,13 @@ app.include_router(usage_router, prefix="/api")
 app.include_router(settings_router, prefix="/api")
 app.include_router(briefing_router, prefix="/api")
 app.include_router(voice_router, prefix="/api")
+
+
+@app.get("/api/me")
+def me_endpoint(request: Request):
+    from api.auth import me as _auth_me  # noqa: PLC0415
+
+    return _auth_me(request)
 
 
 @app.get("/api/health")
