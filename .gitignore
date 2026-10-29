@@ -1,0 +1,36 @@
+# secrets
+.env
+.env.*
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# local data / state
+*.db
+*.db-shm
+*.db-wal
+*.bak
+agent_memory.db*
+memory.db*
+tasks.db*
+jarvis.db*
+rag_index/
+notes/
+logs/
+backups/
+screenshots/
+tts_cache/
+.bin/
+*.txt
+!requirements*.txt
+!README*.md
+
+# IDE / tooling runtime config
+.agents/
+.claude/
+.vscode/
+*.lock

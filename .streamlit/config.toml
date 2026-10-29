@@ -1,0 +1,34 @@
+# Theme for the agent chat app - Claude-style: warm dark/light neutrals,
+# terracotta accent, borderless widgets, rounded card.
+# The [theme.light] / [theme.dark] sections keep the settings appearance toggle.
+
+[theme]
+baseRadius = "large"
+buttonRadius = "0.6rem"
+showWidgetBorder = false
+showSidebarBorder = true
+paddingTop = "1.2rem"
+paddingBottom = "2.5rem"
+
+[theme.light]
+primaryColor = "#B5573A"        # terracotta; dark enough for white button text
+backgroundColor = "#FAF9F5"     # warm cream
+secondaryBackgroundColor = "#F0EEE6"
+textColor = "#29261B"
+borderColor = "#E3E0D5"
+codeBackgroundColor = "#F0EEE6"
+linkColor = "#B5573A"
+
+[theme.dark]
+primaryColor = "#D97757"        # Claude-style terracotta
+backgroundColor = "#262624"     # warm near-black
+secondaryBackgroundColor = "#1F1E1D"
+textColor = "#ECEAE2"
+borderColor = "#3D3C37"
+codeBackgroundColor = "#1F1E1D"
+linkColor = "#E58A6C"
+
+[theme.dark.sidebar]
+backgroundColor = "#1F1E1D"     # sidebar a shade darker than the main area
+secondaryBackgroundColor = "#2D2C2A"
+borderColor = "#34332F"
