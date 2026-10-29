@@ -10,16 +10,16 @@ from jarvis.agent import _fast_command
 
 # 1) parse valid entries
 text = (
-    "chrome -> google-chrome\n"
+    "chrome -> https://www.google.com\n"
     "whatsapp = https://web.whatsapp.com\n"
-    "safe-exec -> echo\n"
+    "safe-link -> https://example.com\n"
     "# comment\n"
 )
 err_before, original = 0, list(_APP_ALIASES.keys())
 ok, errors, parsed = validate_alias_text(text)
 print("valid ok:", ok, "parsed:", parsed)
 assert ok, errors
-assert parsed.get("chrome") == "google-chrome"
+assert parsed.get("chrome") == "https://www.google.com"
 assert parsed.get("whatsapp") == "https://web.whatsapp.com"
 
 # 2) reject bad specs

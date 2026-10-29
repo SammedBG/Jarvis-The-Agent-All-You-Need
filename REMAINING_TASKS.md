@@ -3,9 +3,9 @@
 This file lists project work still to be done.
 
 ## React app pages
-- Missing pages: Memory, Activity, Usage, Documents.
-- Existing API routes available: `/api/memory`, `/api/activity`, `/api/usage`.
-- Documents upload/list/search needs backend route check or a clear not available state.
+- DONE: MemoryPage (`/memory`), ActivityPage (`/activity`), UsagePage (`/usage`), DocumentsPage (`/documents`) added under `web/src/pages/` and wired into `web/src/App.tsx` routes. Sidebar nav links now resolve.
+- Documents page is connected to `/api/documents` for list, upload, search, reindex, and delete.
+- Memory, Activity, and Usage pages use their corresponding authenticated API routes.
 
 ## README and requirements
 - Keep README synced with code and verified commandvs.

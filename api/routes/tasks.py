@@ -51,7 +51,7 @@ def list_tasks_route(
 ):
     from jarvis.tasks import list_tasks as _list_tasks
 
-    text = _list_tasks(view)
+    text = _list_tasks.invoke({"view": view})
     return {"view": view, "text": text, "tasks": _parse_tasks(text)}
 
 

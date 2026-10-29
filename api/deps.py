@@ -6,7 +6,7 @@ from typing import Any, Dict
 from fastapi import HTTPException, Request
 from starlette.status import HTTP_401_UNAUTHORIZED
 
-from api.auth import get_session_from_request  # noqa: PLC0415
+from api.auth import _require_csrf, get_session_from_request  # noqa: PLC0415
 
 
 def require_user(request: Request) -> Dict[str, Any]:
@@ -17,6 +17,7 @@ def require_user(request: Request) -> Dict[str, Any]:
             status_code=HTTP_401_UNAUTHORIZED,
             detail="not authenticated",
         )
+    _require_csrf(request)
     return session
 
 

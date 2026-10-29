@@ -45,11 +45,13 @@ def _thread_date(thread_id: str) -> Optional[date]:
 
 
 @router.get("/conversations")
-def list_conversations(request: Request, user: dict = Depends(require_user)):  # type: ignore[arg-type]
+def list_conversations(
+    request: Request,
+    limit: int = Query(12, ge=1, le=500),
+    user: dict = Depends(require_user),  # type: ignore[arg-type]
+):
     """List conversations grouped Today / Yesterday / Earlier."""
-    recents = recent_conversations() if recent_conversations else []
-    """List conversations grouped Today / Yesterday / Earlier."""
-    recents = recent_conversations() if recent_conversations else []
+    recents = recent_conversations(limit=limit) if recent_conversations else []
     today = date.today()
     yesterday = today - timedelta(days=1)
     groups = {"today": [], "yesterday": [], "earlier": []}
@@ -70,21 +72,25 @@ def get_conversation(
     user: dict = Depends(require_user),  # type: ignore[arg-type]
 ):
     """Return the messages of a conversation."""
-    from jarvis.tasks import log_conversation  # noqa: PLC0415
-
     conn = _db()
     try:
         rows = conn.execute(
-            "SELECT role, content, ts FROM conversation_log WHERE thread_id=? ORDER BY ts ASC",
+            "SELECT text, ts FROM conversation_log WHERE thread_id=? ORDER BY ts ASC, id ASC",
             (thread_id,),
         ).fetchall()
     finally:
         conn.close()
-    if not rows:
-        raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail="conversation not found")
-    messages = [
-        {"role": r["role"], "content": r["content"], "ts": r["ts"]} for r in rows
-    ]
+    messages = []
+    for row in rows:
+        transcript = str(row["text"] or "")
+        user_match = re.search(r"(?:^|\n)User:\s*(.*?)(?=\nJARVIS:|$)", transcript, re.S | re.I)
+        assistant_match = re.search(r"(?:^|\n)JARVIS:\s*(.*)$", transcript, re.S | re.I)
+        if user_match and user_match.group(1).strip():
+            messages.append({"role": "user", "content": user_match.group(1).strip(), "ts": row["ts"]})
+        if assistant_match and assistant_match.group(1).strip():
+            messages.append({"role": "assistant", "content": assistant_match.group(1).strip(), "ts": row["ts"]})
+        if not user_match and not assistant_match and transcript.strip():
+            messages.append({"role": "assistant", "content": transcript.strip(), "ts": row["ts"]})
     return {"thread_id": thread_id, "messages": messages}
 
 
@@ -109,21 +115,25 @@ def rename_conversation(
     user: dict = Depends(require_user),  # type: ignore[arg-type]
 ):
     """Rename a conversation (stored as a decision log entry)."""
-    from jarvis.tasks import log_decision  # noqa: PLC0415
+    from jarvis.conversations import _ensure_title_table  # noqa: PLC0415
 
+    _ensure_title_table()
     title = (payload.title or "").strip() if payload else ""
-    if not title:
-        raise HTTPException(status_code=400, detail="title required")
+    if not title or len(title) > 80:
+        raise HTTPException(status_code=400, detail="title must be between 1 and 80 characters")
     conn = _db()
     try:
-        exists = conn.execute(
-            "SELECT 1 FROM conversation_log WHERE thread_id=? LIMIT 1", (thread_id,)
-        ).fetchone()
+        exists = conn.execute("SELECT 1 FROM conversation_log WHERE thread_id=? LIMIT 1", (thread_id,)).fetchone()
         if not exists:
             raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail="conversation not found")
+        conn.execute(
+            "INSERT INTO conversation_titles(thread_id,title,updated_at) VALUES(?,?,?) "
+            "ON CONFLICT(thread_id) DO UPDATE SET title=excluded.title, updated_at=excluded.updated_at",
+            (thread_id, title, datetime.now().isoformat(timespec="seconds")),
+        )
+        conn.commit()
     finally:
         conn.close()
-    log_decision(f"Renamed conversation {thread_id} to '{title}'")
     return {"ok": True, "thread_id": thread_id, "title": title}
 
 
@@ -133,9 +143,13 @@ def delete_conversation(
     user: dict = Depends(require_user),  # type: ignore[arg-type]
 ):
     """Delete a conversation (its log entries)."""
+    from jarvis.conversations import _ensure_title_table  # noqa: PLC0415
+
+    _ensure_title_table()
     conn = _db()
     try:
         cur = conn.execute("DELETE FROM conversation_log WHERE thread_id=?", (thread_id,))
+        conn.execute("DELETE FROM conversation_titles WHERE thread_id=?", (thread_id,))
         conn.commit()
         if cur.rowcount == 0:
             raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail="conversation not found")

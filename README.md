@@ -257,6 +257,8 @@ For scaling / multi-user: `tasks`/`rules`/`decisions` tables already have a `use
 
 ## Web frontend (React)
 
+Use Node.js **22.22.2 or newer** for the frontend build and test toolchain.
+
 ```bash
 # terminal 1
 uvicorn api.main:app --host 127.0.0.1 --port 8000

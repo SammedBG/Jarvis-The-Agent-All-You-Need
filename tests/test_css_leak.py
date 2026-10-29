@@ -1,13 +1,16 @@
 """Fail if Streamlit pages render CSS rules as visible markdown text."""
 import os
+from pathlib import Path
 os.environ.setdefault("JARVIS_DB", "/tmp/opencode/css_leak_test.db")
 
 import re
 
+import pytest
+pytest.importorskip("streamlit", reason="legacy Streamlit UI dependency is optional")
 from streamlit.testing.v1 import AppTest
 
 pages = None
-ROOT = "/home/rokkun-23/Desktop/Agnet_Example"
+ROOT = Path(__file__).resolve().parent.parent
 
 PAGES = [None, "app_pages/chat.py", "app_pages/today.py", "app_pages/memory.py",
          "app_pages/activity.py", "app_pages/tasks.py", "app_pages/documents.py",
@@ -31,9 +34,9 @@ def _all_rendered_markdown(at):
 def main():
     failures = []
     for p in PAGES:
-        at = AppTest.from_file(ROOT + "/ui.py", default_timeout=300)
+        at = AppTest.from_file(str(ROOT / "ui.py"), default_timeout=300)
         if p:
-            at.switch_page(p)
+            at.switch_page(str(ROOT / p))
         at.run()
         for v in _all_rendered_markdown(at):
             if "{" in v and ";" in v and ("border-radius" in v.lower() or "background:" in v.lower() or "padding:" in v.lower()):
@@ -48,6 +51,10 @@ def main():
             print(p, "::", v)
         raise SystemExit(1)
     print("ALL PAGES CSS LEAK TEST PASSED")
+
+
+def test_streamlit_pages_do_not_leak_css():
+    main()
 
 
 if __name__ == "__main__":

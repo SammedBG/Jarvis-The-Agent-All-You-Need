@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 import sys
 import time
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -21,12 +22,21 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
+load_dotenv(BASE_DIR / ".env")
+
+
+@asynccontextmanager
+async def _lifespan(_app):
+    validate_startup()
+    yield
+
 
 # ---- create app first so routers can be imported without side effects ----
-app = FastAPI(title="JARVIS Desktop Assistant", version="1.0.0")
+app = FastAPI(title="JARVIS Desktop Assistant", version="1.0.0", lifespan=_lifespan)
 
 # ---- security headers middleware ----
 _SECURITY_HEADERS = {
@@ -61,9 +71,13 @@ def _is_dummy_key(key: str) -> bool:
     return False
 
 
+def _env_enabled(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def validate_startup() -> None:
     """Raise SystemExit if startup is unsafe (dummy/missing key) unless fake/test mode."""
-    if os.environ.get("JARVIS_FAKE_AGENT") or os.environ.get("JARVIS_TEST_MODE"):
+    if _env_enabled("JARVIS_FAKE_AGENT") or _env_enabled("JARVIS_TEST_MODE"):
         return
     key = os.environ.get("GROQ_API_KEY", "")
     if _is_dummy_key(key):
@@ -80,7 +94,7 @@ def validate_bind_host(host: str) -> bool:
     loopback = {"127.0.0.1", "localhost", "::1"}
     if host in loopback:
         return True
-    if os.environ.get("JARVIS_ALLOW_REMOTE") or os.environ.get("JARVIS_ALLOW_REMOTE_FLAG"):
+    if _env_enabled("JARVIS_ALLOW_REMOTE") or _env_enabled("JARVIS_ALLOW_REMOTE_FLAG"):
         return True
     return False
 
@@ -149,6 +163,7 @@ from api.routes.usage import router as usage_router  # noqa: E402
 from api.routes.settings import router as settings_router  # noqa: E402
 from api.routes.briefing import router as briefing_router  # noqa: E402
 from api.routes.voice import router as voice_router  # noqa: E402
+from api.routes.documents import router as documents_router  # noqa: E402
 
 app.include_router(auth_router, prefix="/api/auth")
 app.include_router(chat_router, prefix="/api")
@@ -160,6 +175,7 @@ app.include_router(usage_router, prefix="/api")
 app.include_router(settings_router, prefix="/api")
 app.include_router(briefing_router, prefix="/api")
 app.include_router(voice_router, prefix="/api")
+app.include_router(documents_router, prefix="/api")
 
 
 @app.get("/api/me")

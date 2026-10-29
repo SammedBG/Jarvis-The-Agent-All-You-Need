@@ -13,15 +13,28 @@ from pathlib import Path
 from . import tasks
 
 
+def _ensure_title_table() -> None:
+    try:
+        with sqlite3.connect(str(tasks.DB_PATH), timeout=3) as conn:
+            conn.execute("""CREATE TABLE IF NOT EXISTS conversation_titles (
+                thread_id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )""")
+    except sqlite3.Error:
+        pass
+
+
 def recent_conversations(limit: int = 12) -> list:
     """[(thread_id, title), ...] newest first, for the sidebar."""
+    _ensure_title_table()
     try:
         conn = sqlite3.connect(str(tasks.DB_PATH), timeout=3)
         try:
             rows = conn.execute(
-                "SELECT thread_id, MAX(checkpoint_id) FROM checkpoints "
+                "SELECT thread_id, MAX(ts) AS last_ts FROM conversation_log "
                 "WHERE thread_id LIKE 'ui-%' GROUP BY thread_id "
-                "ORDER BY MAX(checkpoint_id) DESC LIMIT ?", (limit,)
+                "ORDER BY last_ts DESC LIMIT ?", (max(1, min(int(limit), 500)),)
             ).fetchall()
         finally:
             conn.close()
@@ -36,10 +49,16 @@ def recent_conversations(limit: int = 12) -> list:
 
 
 def _conversation_title(thread_id: str, checkpoint_id: str) -> str:
-    """First up to 5 words of what you said — short, no-orphan, unique-ish."""
+    """Use a saved title or a clean short title from the first user message."""
+    _ensure_title_table()
     try:
         conn = sqlite3.connect(str(tasks.DB_PATH), timeout=3)
         try:
+            saved = conn.execute(
+                "SELECT title FROM conversation_titles WHERE thread_id=?", (thread_id,)
+            ).fetchone()
+            if saved and str(saved[0]).strip():
+                return str(saved[0]).strip()
             row = conn.execute(
                 "SELECT text FROM conversation_log WHERE thread_id=? ORDER BY ts ASC LIMIT 1",
                 (thread_id,),
@@ -50,11 +69,14 @@ def _conversation_title(thread_id: str, checkpoint_id: str) -> str:
         return ""
     if not row:
         return ""
-    words = str(row[0] or "").split()
-    text = " ".join(words[:5])
-    if len(words) > 5:
-        text = text + "…"
-    return text[:40] or "(untitled)"
+    transcript = str(row[0] or "")
+    first = re.search(r"(?:^|\n)User:\s*(.*?)(?=\nJARVIS:|$)", transcript, re.S | re.I)
+    text = (first.group(1) if first else transcript).strip()
+    words = text.split()
+    title = " ".join(words[:7])
+    if len(words) > 7:
+        title += "…"
+    return title[:56] or "New chat"
 
 
 def search_conversations(query: str, limit: int = 8) -> list[dict]:

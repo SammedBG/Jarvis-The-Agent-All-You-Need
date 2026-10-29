@@ -6,7 +6,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const onResize = () => {
-      if (window.innerWidth < 900) setCollapsed(true)
+      // Keep the shell in sync when browser zoom or window resizing crosses
+      // the desktop/mobile breakpoint in either direction.
+      setCollapsed(window.innerWidth < 900)
     }
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)

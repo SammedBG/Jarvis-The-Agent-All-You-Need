@@ -33,6 +33,29 @@ export function ChatShell({ threadId }: { threadId: string }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const autoScroll = useRef(true)
 
+  useEffect(() => {
+    let active = true
+    setMessages([])
+    setTools([])
+    setErrorCard(null)
+    setUsageLine(null)
+    setApproval(null)
+    setStreaming(false)
+    autoScroll.current = true
+    api.GET<{ messages: Array<{ role: 'user' | 'assistant'; content: string; ts: string }> }>(
+      `/api/conversations/${encodeURIComponent(threadId)}`,
+    ).then((data) => {
+      if (active) {
+        setMessages((data.messages || []).map((message, index) => ({
+          id: `${threadId}-${message.ts}-${index}`,
+          role: message.role,
+          content: message.content,
+        })))
+      }
+    }).catch(() => { /* New conversations have no saved turns yet. */ })
+    return () => { active = false }
+  }, [threadId])
+
   const appendMessage = useCallback((m: ChatMsg) => setMessages((prev) => [...prev, m]), [])
   const updateLastAssistant = useCallback((updater: (m: ChatMsg) => ChatMsg) => {
     setMessages((prev) => {
@@ -94,13 +117,14 @@ export function ChatShell({ threadId }: { threadId: string }) {
       flush(true)
       setStreaming(false)
       ;(window as any).__chat_abort = null
+      window.dispatchEvent(new Event('jarvis:conversation-updated'))
       const needsLoc = /which area and city/i.test(accumulated) || /no location saved/i.test(accumulated)
       if (needsLoc) setNeedLocCard(true)
     }
   }, [threadId, streaming, appendMessage, updateLastAssistant])
 
   const stop = useCallback(() => {
-    try { api.POST('/api/chat/stop', { thread_id: threadId }) } catch {}
+    void api.POST('/api/chat/stop', { thread_id: threadId }).catch(() => {})
     const c = (window as any).__chat_abort as AbortController | null
     c?.abort()
   }, [threadId])
@@ -180,7 +204,6 @@ export function ChatShell({ threadId }: { threadId: string }) {
       <div className="chat-scroll" ref={scrollRef}>
         {messages.length === 0 && (
           <>
-            <h1 className="greeting">Good morning</h1>
             {false && <div className="time-check" />}
             <BriefingCard />
             <div className="chips">
@@ -228,7 +251,7 @@ export function ChatShell({ threadId }: { threadId: string }) {
         {errorCard && (
           <div className="error-card">
             <p>{errorCard}</p>
-            <button className="btn" onClick={() => setErrorCard(null)}>Retry</button>
+            <button className="btn" onClick={() => { const retry = lastUserRef.current; setErrorCard(null); if (retry) void send(retry) }}>Retry</button>
           </div>
         )}
       </div>

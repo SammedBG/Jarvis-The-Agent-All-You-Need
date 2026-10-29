@@ -6,7 +6,9 @@ export interface SSEEvent {
 }
 
 export function parseSSEChunk(chunk: string, residual: string): { events: SSEEvent[]; residual: string } {
-  const combined = residual + chunk
+  // EventSourceResponse emits CRLF by default; normalize line endings before
+  // splitting so frames are parsed consistently across browsers and servers.
+  const combined = (residual + chunk).replace(/\r\n/g, '\n').replace(/\r/g, '\n')
   const events: SSEEvent[] = []
   const blocks = combined.split('\n\n')
   const leftover = blocks.pop() ?? ''

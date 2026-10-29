@@ -154,12 +154,10 @@ def test_save_location_direct_lat_lon():
 
 
 def test_home_location_unchanged_in_real_db():
-    import sqlite3
-    c = sqlite3.connect("/home/rokkun-23/Desktop/Agnet_Example/jarvis.db")
-    r = c.execute("SELECT value FROM settings WHERE key='home_location'").fetchone()
-    c.close()
-    assert r is not None and r[0] != "", "real DB home_location should be preserved"
-    print("PASS real DB home_location unchanged:", r[0][:60])
+    from jarvis.tasks import DB_PATH
+    project_db = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "jarvis.db"))
+    assert os.path.abspath(str(DB_PATH)) != project_db, "tests must never connect to the real database"
+    print("PASS tests use an isolated database:", DB_PATH)
 
 
 if __name__ == "__main__":

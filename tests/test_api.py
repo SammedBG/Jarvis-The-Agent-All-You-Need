@@ -332,6 +332,23 @@ def test_conversation_grouping_and_search_escape():
     print("search escape OK")
 
 
+def test_conversation_history_and_custom_title():
+    csrf = _login_owner_and_csrf()
+    history = client.get("/api/conversations/ui-main")
+    assert history.status_code == 200, history.text
+    assert history.json()["messages"][0]["role"] == "user"
+    assert history.json()["messages"][0]["content"] == "a b c"
+    renamed = client.patch(
+        "/api/conversations/ui-main",
+        json={"title": "Weekend meal ideas"},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert renamed.status_code == 200, renamed.text
+    listing = client.get("/api/conversations?limit=100")
+    titles = [c["title"] for group in listing.json().values() for c in group]
+    assert "Weekend meal ideas" in titles, titles
+
+
 # ---------- real db unchanged ----------
 def test_real_db_unchanged():
     import sqlite3
@@ -349,3 +366,100 @@ def test_lease_secret_lateral():
     # placeholder raw output catch - report env keys
     print("GROQ_API_KEY present:", bool(os.getenv("GROQ_API_KEY")))
     print("MODEL env names checked:", "MODEL, MODEL_COMPLEX, MODEL_SIMPLE")
+
+
+def _login_owner_and_csrf():
+    """Ensure the test owner has an authenticated session and return CSRF token."""
+    c = sqlite3.connect(str(tasks_mod.DB_PATH))
+    c.execute("DELETE FROM auth_failed_logins")
+    c.commit()
+    c.close()
+    me = client.get("/api/me")
+    if me.status_code == 200:
+        client.post("/api/auth/logout", headers={"X-CSRF-Token": me.json()["csrf_token"]})
+    client.post("/api/auth/setup", json={"username": "owner", "password": "supersecret1234"})
+    login = client.post("/api/auth/login", json={"username": "owner", "password": "supersecret1234"})
+    assert login.status_code == 200, login.text
+    return client.get("/api/me").json()["csrf_token"]
+
+
+def test_csrf_required_for_mutating_resource_routes():
+    csrf = _login_owner_and_csrf()
+    without_csrf = client.patch("/api/settings", json={"home_location": "test"})
+    assert without_csrf.status_code == 403, without_csrf.text
+    with_csrf = client.patch(
+        "/api/settings", json={"home_location": "test"}, headers={"X-CSRF-Token": csrf}
+    )
+    assert with_csrf.status_code == 200, with_csrf.text
+
+
+def test_chat_stop_reads_thread_id_from_frontend_json_body():
+    from api.routes import chat as chat_routes
+
+    csrf = _login_owner_and_csrf()
+    thread_id = "stop-body-regression"
+    chat_routes._cancelled.discard(thread_id)
+    response = client.post(
+        "/api/chat/stop",
+        json={"thread_id": thread_id},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert response.status_code == 200, response.text
+    assert thread_id in chat_routes._cancelled
+    chat_routes._cancelled.discard(thread_id)
+
+
+def test_documents_upload_csrf_and_filename_handling(monkeypatch, tmp_path):
+    from api.routes import documents as document_routes
+
+    csrf = _login_owner_and_csrf()
+    monkeypatch.setattr(document_routes, "DOCS_DIR", tmp_path)
+    content = b"private test document"
+    denied = client.post(
+        "/api/documents/upload", files={"file": ("test.txt", content, "text/plain")}
+    )
+    assert denied.status_code == 403, denied.text
+    uploaded = client.post(
+        "/api/documents/upload",
+        files={"file": ("test.txt", content, "text/plain")},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    assert uploaded.json()["filename"] == "test.txt"
+    assert (tmp_path / "test.txt").read_bytes() == content
+
+
+def test_chat_document_extract_endpoint(monkeypatch):
+    from api.routes import documents as document_routes
+
+    csrf = _login_owner_and_csrf()
+    monkeypatch.setattr(document_routes, "read_file", lambda _path: [(None, "Extracted test content")])
+    response = client.post(
+        "/api/documents/extract",
+        files={"file": ("brief.md", b"content", "text/markdown")},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json() == {"filename": "brief.md", "text": "Extracted test content"}
+
+
+def test_tasks_list_route_invokes_langchain_tool():
+    csrf = _login_owner_and_csrf()
+    response = client.get("/api/tasks?view=all", headers={"X-CSRF-Token": csrf})
+    assert response.status_code == 200, response.text
+    assert "tasks" in response.json()
+
+
+def test_production_spa_and_built_assets_are_served():
+    from pathlib import Path
+    import re
+
+    root = client.get("/")
+    assert root.status_code == 200, root.text[:200]
+    html = root.text
+    assets = re.findall(r'(?:src|href)="(/assets/[^\"]+)"', html)
+    assert assets, "built SPA should reference fingerprinted assets"
+    for asset in assets:
+        response = client.get(asset)
+        assert response.status_code == 200, (asset, response.status_code)
+        assert response.content

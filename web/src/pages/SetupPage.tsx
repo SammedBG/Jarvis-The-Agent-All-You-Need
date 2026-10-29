@@ -38,19 +38,12 @@ export function SetupPage() {
         body: JSON.stringify({ username, password }),
       })
       if (res.ok) {
-        await auth.login(username, password)
-        // after setup, auto login
-        const lf = await fetch('/api/auth/login', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username, password }),
-        })
-        if (lf.ok) {
+        const login = await auth.login(username, password)
+        if (login.ok) {
           await auth.refresh()
           navigate('/')
         } else {
-          setError('Account created. Please sign in.')
+          setError(login.error || 'Account created. Please sign in.')
           navigate('/login')
         }
       } else {

@@ -671,6 +671,14 @@ def call_model(state: MessagesState):
                     tu = result.response_metadata.get("token_usage", tu)
                 pt = tu.get("prompt_tokens", tu.get("input_tokens", 0)) or 0
                 ct = tu.get("completion_tokens", tu.get("output_tokens", 0)) or 0
+            # accumulate real token usage for this turn (reported via SSE)
+            _turn_usage = _CURRENT_TURN_USAGE.get() or {
+                "prompt_tokens": 0, "completion_tokens": 0, "route": ""
+            }
+            _turn_usage["prompt_tokens"] = int(_turn_usage.get("prompt_tokens", 0)) + int(pt or 0)
+            _turn_usage["completion_tokens"] = int(_turn_usage.get("completion_tokens", 0)) + int(ct or 0)
+            _turn_usage["route"] = _route_label
+            _CURRENT_TURN_USAGE.set(_turn_usage)
             try:
                 log_usage(model=model_name, prompt_tokens=pt, completion_tokens=ct,
                          latency_ms=int((time.perf_counter() - _start) * 1000),
@@ -703,6 +711,9 @@ _LAST_ROUTING_NOTE: contextvars.ContextVar = contextvars.ContextVar(
 )
 _CURRENT_THREAD: contextvars.ContextVar = contextvars.ContextVar(
     "jarvis_current_thread", default=None)
+_CURRENT_TURN_USAGE: contextvars.ContextVar = contextvars.ContextVar(
+    "jarvis_current_turn_usage", default=None
+)
 
 def _resolve_setting(key: str, fallback: str) -> str:
     # env takes precedence, then settings table, then default.
@@ -1372,6 +1383,7 @@ def ask_agent_stream(text: str, thread_id: str = "default", resume=None):
         _REQUESTED_GROUPS.set(frozenset())
         _UNTRUSTED_SEEN.set(False)
         _UNTRUSTED_ORIGIN.set(None)
+        _CURRENT_TURN_USAGE.set({"prompt_tokens": 0, "completion_tokens": 0})
 
         _f = _fast_command(text) if (resume is None and text.strip()) else None
         if _f is not None:
@@ -1434,6 +1446,12 @@ def ask_agent_stream(text: str, thread_id: str = "default", resume=None):
                             yield {"type": "tool_result",
                                    "name": getattr(msg, "name", "") or "",
                                    "text": to_text(msg.content)[:400]}
+        # report real token usage for this turn
+        _turn_usage = _CURRENT_TURN_USAGE.get()
+        yield {"type": "usage",
+               "prompt_tokens": int(_turn_usage.get("prompt_tokens", 0)),
+               "completion_tokens": int(_turn_usage.get("completion_tokens", 0)),
+               "route": _turn_usage.get("route", "")}
         pending = get_pending(config)
         if pending is not None:  # interrupt happened; "pending" was already yielded
             return

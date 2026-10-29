@@ -29,4 +29,20 @@ describe('parseSSEChunk', () => {
     const { events } = parseSSEChunk(chunk, '')
     expect(events[0].type).toBe('error')
   })
+
+  it('parses CRLF frames emitted by the FastAPI SSE response', () => {
+    const chunk = 'data: {"type":"token","text":"hello"}\r\n\r\n'
+    const { events, residual } = parseSSEChunk(chunk, '')
+    expect(events).toHaveLength(1)
+    expect(events[0].text).toBe('hello')
+    expect(residual).toBe('')
+  })
+
+  it('parses CRLF frames split between network chunks', () => {
+    const first = parseSSEChunk('data: {"type":"token","text":"hello"}\r', '')
+    const second = parseSSEChunk('\n\r\n', first.residual)
+    expect(first.events).toHaveLength(0)
+    expect(second.events).toHaveLength(1)
+    expect(second.events[0].text).toBe('hello')
+  })
 })

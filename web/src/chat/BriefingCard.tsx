@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { api } from '../lib/api'
+import { api, getCsrfToken } from '../lib/api'
+import { ChevronDown, ChevronUp, RefreshCw, Volume2, X } from 'lucide-react'
 
 interface Section { title: string; items: string[] }
 interface Briefing { text: string; date: string; sections: Section[]; done7?: number }
@@ -9,6 +10,7 @@ export function BriefingCard() {
   const [expanded, setExpanded] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const [dismissed, setDismissed] = useState(false)
 
   async function load() {
     setBusy(true)
@@ -23,73 +25,94 @@ export function BriefingCard() {
     setBusy(false)
   }
   async function dismiss() {
-    try { await api.POST('/api/settings', { home_location: '' }) } catch {}
+    const key = `jarvis-briefing-dismissed-${new Date().toISOString().slice(0, 10)}`
+    localStorage.setItem(key, '1')
+    setDismissed(true)
     setB(null)
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    const key = `jarvis-briefing-dismissed-${new Date().toISOString().slice(0, 10)}`
+    if (localStorage.getItem(key)) {
+      setDismissed(true)
+      return
+    }
+    void load()
+  }, [])
 
   if (!b) {
     if (busy) return <div className="skeleton" />
     if (err) return <div className="error-card small"><p>{err}</p><button className="btn" onClick={load}>Retry</button></div>
     return null
   }
-  const tasks = b.sections?.reduce((acc, s) => acc + s.items.length, 0) || 0
-  const summary = `${tasks} due today - 0 overdue`
+  const dueToday = b.sections?.filter((section) => /due today|today/i.test(section.title))
+    .reduce((total, section) => total + section.items.length, 0) || 0
+  const overdue = b.sections?.filter((section) => /overdue/i.test(section.title))
+    .reduce((total, section) => total + section.items.length, 0) || 0
+  const summary = `${dueToday} due today · ${overdue} overdue`
   const dateLabel = b.date ? new Date(b.date).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' }) : ''
   const visibleSections = b.sections?.filter((s) => s.items && s.items.length > 0) || []
 
   async function speak() {
     try {
+      const csrf = getCsrfToken()
       const res = await fetch('/api/speak', {
-        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': (window as any).__csrf || '' },
+        method: 'POST', credentials: 'include', headers: {
+          'Content-Type': 'application/json',
+          ...(csrf ? { 'X-CSRF-Token': csrf } : {}),
+        },
         body: JSON.stringify({ text: b?.text || '' }),
       })
       if (res.ok) {
         const blob = await res.blob()
         const url = URL.createObjectURL(blob)
         const audio = new Audio(url)
-        audio.play()
+        audio.addEventListener('ended', () => URL.revokeObjectURL(url), { once: true })
+        await audio.play()
       }
     } catch {}
   }
 
+  if (dismissed) return null
+
   return (
-    <div className="card briefing-card">
-      <h3>Daily briefing</h3>
-      {dateLabel && <div className="muted small">{dateLabel}</div>}
-      <div className="muted small">{summary}</div>
-      <div className="dialog-row push">
-        <button className="btn btn-secondary" title="Play briefing" onClick={speak}>Play</button>
-        <button className="btn btn-secondary" title="Refresh" onClick={refresh} disabled={busy}>{busy ? '…' : 'Refresh'}</button>
-        <button className="btn btn-secondary" title="Dismiss for today" onClick={dismiss}>Dismiss for today</button>
+    <section className="card briefing-card" aria-label="Daily briefing">
+      <div className="briefing-heading">
+        <div className="briefing-copy">
+          <h3>Today at a glance</h3>
+          <p>{dateLabel}{dateLabel ? ' · ' : ''}{summary}</p>
+        </div>
+        <div className="briefing-actions">
+          <button className="briefing-action" title="Listen to briefing" aria-label="Listen to briefing" onClick={speak}>
+            <Volume2 size={17} /><span>Listen</span>
+          </button>
+          <button className="briefing-action" title="Refresh briefing" aria-label="Refresh briefing" onClick={refresh} disabled={busy}>
+            <RefreshCw size={16} className={busy ? 'spin' : ''} /><span>Refresh</span>
+          </button>
+          <button className="briefing-icon-action" title="Hide for today" aria-label="Hide briefing for today" onClick={dismiss}>
+            <X size={17} />
+          </button>
+        </div>
       </div>
       {err && <div className="error-text">{err}</div>}
-      {b.text && visibleSections.length === 0 && !busy && <div className="muted small auto-collapse">Nothing due today</div>}
-      <details open={expanded} onToggle={(e) => setExpanded((e.target as any).open)}>
-        <summary className="hidden-details-summary">{expanded ? 'Collapse' : ''}</summary>
-        {b.text && visibleSections.length === 0 && expanded === false ? null : null}
-      </details>
-      {expanded && (
+      {visibleSections.length > 0 && (
         <>
-          {visibleSections.map((sec) => (
-            <div key={sec.title} className="assist-block">
+          {expanded && visibleSections.map((sec) => (
+            <div key={sec.title} className="briefing-section">
               <div className="assist-title">{sec.title}</div>
               <ul className="assist-ul">
-                {sec.items.map((it, i) => (
-                  <li key={i} className="assist-row">
-                    <input type="checkbox" className="assist-check" aria-label="done" />
-                    <span>{it.replace('[normal]', '').trim()}</span>
-                    <span className="muted small time">{(it.match(/\d{1,2}:\d{2}\s*(?:am|pm)?/i) || [''])[0]}</span>
-                  </li>
+                {sec.items.map((item, index) => (
+                  <li key={index} className="assist-row">{item.replace('[normal]', '').trim()}</li>
                 ))}
               </ul>
             </div>
           ))}
-          {!expanded && null}
+          <button className="briefing-expand" onClick={() => setExpanded((value) => !value)}>
+            {expanded ? <><ChevronUp size={15} /> Hide details</> : <><ChevronDown size={15} /> View today’s items</>}
+          </button>
         </>
       )}
-      {b.done7 ? <div className="muted small">Completed in the last 7 days: {b.done7}</div> : null}
-    </div>
+      {!visibleSections.length && b.text && <p className="briefing-empty">Nothing scheduled for today.</p>}
+    </section>
   )
 }

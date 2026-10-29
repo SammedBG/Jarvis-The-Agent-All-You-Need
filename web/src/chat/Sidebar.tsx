@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { api } from '../lib/api'
 
 interface Conv { thread_id: string; title: string }
@@ -7,25 +7,32 @@ interface Grouped { today: Conv[]; yesterday: Conv[]; earlier: Conv[] }
 
 export function Sidebar({ collapsed, setCollapsed }: { collapsed: boolean; setCollapsed: (v: boolean) => void }) {
   const navigate = useNavigate()
-  const [groups, setGroups] = useState<Grouped>({ today: [], yesterday: [], earlier: [] })
-  const [query, setQuery] = useState('')
-  const [results, setResults] = useState<any[]>([])
+  const location = useLocation()
+  const currentThread = new URLSearchParams(location.search).get('t') || 'ui-main'
+  const [conversations, setConversations] = useState<Conv[]>([])
 
-  async function loadRecents() {
-    try {
-      const data = await api.GET<Grouped>('/api/conversations')
-      setGroups(data)
-    } catch {}
-  }
-  async function search(q: string) {
-    if (!q.trim()) { setResults([]); return }
-    try {
-      const data = await api.GET<{ results: any[] }>(`/api/search?q=${encodeURIComponent(q)}`)
-      setResults(data.results || [])
-    } catch { setResults([]) }
-  }
+  useEffect(() => {
+    let alive = true
+    const load = () => {
+      api.GET<Grouped>('/api/conversations?limit=100').then((groups) => {
+        if (alive) setConversations([...(groups.today || []), ...(groups.yesterday || []), ...(groups.earlier || [])])
+      }).catch(() => { if (alive) setConversations([]) })
+    }
+    load()
+    window.addEventListener('jarvis:conversation-updated', load)
+    return () => { alive = false; window.removeEventListener('jarvis:conversation-updated', load) }
+  }, [location.pathname, location.search])
 
-  useEffect(() => { loadRecents() }, [])
+  const current = conversations.find((conversation) => conversation.thread_id === currentThread)
+  const recent = conversations.filter((conversation) => conversation.thread_id !== currentThread).slice(0, 3)
+  function startNewChat() {
+    const now = new Date()
+    const id = `ui-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`
+    navigate(`/?t=${id}`)
+  }
+  const nav = (path: string, label: string) => (
+    <button className={`navlink${location.pathname === path ? ' active' : ''}`} onClick={() => navigate(path)}>{label}</button>
+  )
 
   if (collapsed) {
     return (
@@ -39,48 +46,37 @@ export function Sidebar({ collapsed, setCollapsed }: { collapsed: boolean; setCo
     <aside className="sidebar">
       <button className="icon-btn close" onClick={() => setCollapsed(true)} aria-label="hide">≡</button>
       <div className="brand">JARVIS</div>
-      <button className="navbtn primary" onClick={() => navigate('/')}>+ New chat</button>
-      <div className="side-label">Search chats</div>
-      <input className="input-search" placeholder="Search conversations…" value={query} onChange={(e) => { setQuery(e.target.value); search(e.target.value) }} />
-      {query && results.length > 0 && (
-        <div className="search-results">
-          {results.map((r) => (
-            <button key={r.thread_id} className="recent-item" onClick={() => navigate(`/chat/${r.thread_id}`)}>
-              • {r.snippet?.slice(0, 50)}
-            </button>
-          ))}
-        </div>
-      )}
-      {results.length === 0 && !query && (
-        <>
-          <div className="side-label">Recents</div>
-          {['Today', 'Yesterday', 'Earlier'].map((name, i) => {
-            const arr = [groups.today, groups.yesterday, groups.earlier][i]
-            if (!arr.length) return null
-            return (
-              <div key={name}>
-                <div className="side-sub">{name}</div>
-                {arr.slice(0, 5).map((c) => (
-                  <button key={c.thread_id} className="recent-item" onClick={() => navigate(`/chat/${c.thread_id}`)}>
-                    {c.title}
-                  </button>
-                ))}
-              </div>
-            )
-          })}
-        </>
-      )}
+      <button className="navbtn primary" onClick={startNewChat}>+ New chat</button>
+      <div className="side-label">Chats</div>
+      <button
+        className={`recent-item current-chat${location.pathname === '/' ? ' active' : ''}`}
+        title="Open the current chat"
+        onClick={() => navigate(`/?t=${encodeURIComponent(currentThread)}`)}
+      >
+        <span className="current-chat-dot" aria-hidden="true" />
+        <span className="chat-title">{current?.title || 'Current chat'}</span>
+      </button>
+      {recent.map((conversation) => (
+        <button
+          key={conversation.thread_id}
+          className="recent-item sidebar-chat"
+          title={conversation.title}
+          onClick={() => navigate(`/?t=${encodeURIComponent(conversation.thread_id)}`)}
+        >
+          <span className="chat-title">{conversation.title}</span>
+        </button>
+      ))}
+      <button className="all-chats-link" onClick={() => navigate('/chats')}>View all chats</button>
       <div className="side-divider" />
       <div className="side-label">Navigation</div>
-      <button className="navlink" onClick={() => navigate('/')}>Chat</button>
-      <button className="navlink" onClick={() => navigate('/today')}>Today</button>
-      <button className="navlink" onClick={() => navigate('/tasks')}>Tasks</button>
-      <button className="navlink" onClick={() => navigate('/settings')}>Settings</button>
+      {nav('/today', 'Today')}
+      {nav('/tasks', 'Tasks')}
+      {nav('/settings', 'Settings')}
       <div className="side-label">Your data</div>
-      <button className="navlink" onClick={() => navigate('/memory')}>Memory</button>
-      <button className="navlink" onClick={() => navigate('/documents')}>Documents</button>
-      <button className="navlink" onClick={() => navigate('/activity')}>Activity</button>
-      <button className="navlink" onClick={() => navigate('/usage')}>Usage</button>
+      {nav('/memory', 'Memory')}
+      {nav('/documents', 'Documents')}
+      {nav('/activity', 'Activity')}
+      {nav('/usage', 'Usage')}
     </aside>
   )
 }
