@@ -1,0 +1,2 @@
+# Streamlit-only (legacy UI). The React app + API do not need these.
+streamlit>=1.40
