@@ -263,6 +263,3 @@ def reminder_watch() -> None:
 
 reminder_watch()
 briefing_watch()
-
-# Run the navigation (renders the selected page in main area)
-nav.run()
