@@ -22,6 +22,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
+from .cache import get_state, set_state, clear_state
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 LOCATION_KEY = "home_location"
 
@@ -51,8 +53,7 @@ def get_my_location() -> str:
     except Exception:
         pass
     try:
-        import streamlit as st
-        st.session_state["places_location_asked"] = True
+        set_state("places_location_asked", True)
     except Exception:
         pass
     return ("No location saved. Ask the user once: 'Which area and city are you in?' "
@@ -81,8 +82,7 @@ def save_location(label: str) -> str:
         return f"Saved in-memory, but DB write failed: {e}"
     # location is now saved: reset the ask-once flag so the next search proceeds
     try:
-        import streamlit as st
-        st.session_state["places_location_asked"] = False
+        set_state("places_location_asked", False)
     except Exception:
         pass
     return f"Saved location {label} (this is stored; coords rounded on display: " \
@@ -632,10 +632,9 @@ def find_places(query: str, radius_m: int = 3000, open_now: bool = True,
         # Never ask twice in the same session; never ask for coordinates.
         already_asked = False
         try:
-            import streamlit as st
-            already_asked = bool(st.session_state.get("places_location_asked", False))
+            already_asked = bool(get_state("places_location_asked", False))
             if not already_asked:
-                st.session_state["places_location_asked"] = True
+                set_state("places_location_asked", True)
         except Exception:
             pass
         if already_asked:

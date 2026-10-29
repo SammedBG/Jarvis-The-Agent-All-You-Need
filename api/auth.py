@@ -28,7 +28,7 @@ from typing import Any, Dict, Optional
 from argon2 import PasswordHasher
 from fastapi import APIRouter, Cookie, Header, HTTPException, Request, Response
 from pydantic import BaseModel
-from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_403_FORBIDDEN
+from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_403_FORBIDDEN, HTTP_409_CONFLICT
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 if str(BASE_DIR) not in __import__("sys").path:
@@ -325,7 +325,7 @@ def setup(payload: SetupPayload, request: Request, response: Response):
     try:
         if _owner_exists(conn):
             raise HTTPException(
-                status_code=HTTP_403_FORBIDDEN,
+                status_code=HTTP_409_CONFLICT,
                 detail="auth already configured",
             )
         username = (payload.username or "").strip()
@@ -453,6 +453,19 @@ def logout_all(request: Request, response: Response):
         conn.close()
     response.delete_cookie("session", path="/")
     return {"ok": True}
+
+
+@router.get("/status")
+def status(request: Request):
+    """Unauthenticated: whether an owner exists and whether a session is active."""
+    _check_origin(request)
+    conn = _db()
+    try:
+        owner_exists = _owner_exists(conn)
+    finally:
+        conn.close()
+    session = get_session_from_request(request)
+    return {"owner_exists": bool(owner_exists), "authenticated": bool(session)}
 
 
 @router.get("/me")

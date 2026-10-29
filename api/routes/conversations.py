@@ -7,7 +7,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Path as PathParam, Query
+from fastapi import APIRouter, Depends, HTTPException, Path as PathParam, Query, Request
 from pydantic import BaseModel
 from starlette.status import HTTP_404_NOT_FOUND
 
@@ -45,7 +45,9 @@ def _thread_date(thread_id: str) -> Optional[date]:
 
 
 @router.get("/conversations")
-def list_conversations(request, user: dict = Depends(require_user)):  # type: ignore[arg-type]
+def list_conversations(request: Request, user: dict = Depends(require_user)):  # type: ignore[arg-type]
+    """List conversations grouped Today / Yesterday / Earlier."""
+    recents = recent_conversations() if recent_conversations else []
     """List conversations grouped Today / Yesterday / Earlier."""
     recents = recent_conversations() if recent_conversations else []
     today = date.today()

@@ -29,12 +29,7 @@ if _raw_db_env:
     DB_PATH = _candidate
 else:
     DB_PATH = BASE_DIR / "jarvis.db"
-import logging as _bootstrap_logging  # noqa: PLC0415
-if str(DB_PATH).startswith(("/tmp", "/var/tmp")):
-    _bootstrap_logging.getLogger("jarvis").warning(
-        "WARNING: DB path points inside /tmp (may not persist): %s", DB_PATH
-    )
-_bootstrap_logging.getLogger("jarvis").info("DB_PATH resolved to: %s", DB_PATH)
+# logging handled in jarvis.tasks (once per process)
 
 MAX_FACT_CHARS = 300
 MIN_FACT_CHARS = 3

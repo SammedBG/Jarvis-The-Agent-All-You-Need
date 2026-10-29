@@ -1,9 +1,18 @@
 """FastAPI backend tests (temp DB, fake agent)."""
 import os
-os.environ.setdefault("JARVIS_DB", "/tmp/opencode/api_test.db")
-os.environ.setdefault("AGNET_TASKS_DB", "/tmp/opencode/api_test.db")
-os.environ.setdefault("GROQ_API_KEY", "dummy")
+from pathlib import Path
 
+ROOT = str(Path(__file__).resolve().parent.parent)
+REAL_DB = str(Path(ROOT) / "jarvis.db")
+
+# Hard-protect the real DB: never let tests run against it even if the
+# environment variable is explicitly pointed at it.
+_db_candidate = os.environ.get("JARVIS_DB") or os.environ.get("AGNET_TASKS_DB")
+if not _db_candidate or Path(_db_candidate).resolve() == Path(REAL_DB).resolve():
+    _db_candidate = "/tmp/opencode/api_test.db"
+os.environ["JARVIS_DB"] = _db_candidate
+os.environ["AGNET_TASKS_DB"] = _db_candidate
+os.environ.setdefault("GROQ_API_KEY", "dummy")
 import json
 import re
 import sqlite3
@@ -33,6 +42,9 @@ DB = tasks_mod.DB_PATH
 
 
 def _clean_tables():
+    # Never touch the real jarvis.db
+    if Path(str(tasks_mod.DB_PATH)).resolve() == Path(REAL_DB).resolve():
+        raise RuntimeError("refusing to clean real DB: " + str(tasks_mod.DB_PATH))
     c = tasks_mod._conn
     for t in ("auth_users", "auth_sessions", "auth_failed_logins",
               "activity_log", "usage", "tasks", "rules", "decisions", "settings",
@@ -99,13 +111,15 @@ def test_setup_once():
     r = client.post("/api/auth/setup", json={"username": "owner", "password": "supersecret1234"})
     assert r.status_code == 200, r.text
     r2 = client.post("/api/auth/setup", json={"username": "owner2", "password": "supersecret1234"})
-    assert r2.status_code == 403, r2.text
+    assert r2.status_code == 409, r2.text
 
 
 def test_short_password_setup_rejected():
     # already configured -> 403 either way
     r = client.post("/api/auth/setup", json={"username": "x", "password": "short"})
-    assert r.status_code == 403
+    # once configured -> 409 "already configured"; short password pre-config would 403 too, 
+    # so accept either 403 or 409
+    assert r.status_code in (403, 409), r.text
 
 
 # ---------- login + lockout + CSRF ----------

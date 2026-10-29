@@ -78,15 +78,7 @@ if _raw_db_env:
     DB_PATH = _candidate
 else:
     DB_PATH = BASE_DIR / "jarvis.db"
-if str(DB_PATH).startswith(("/tmp", "/var/tmp")):
-    import logging as _logging  # noqa: PLC0415
-
-    _logging.getLogger("jarvis").warning(
-        "WARNING: DB path points inside /tmp (may not persist): %s", DB_PATH
-    )
-    import logging as _l2  # noqa: PLC0415
-
-    _l2.getLogger("jarvis").info("DB_PATH resolved to: %s", DB_PATH)
+# logging handled in jarvis.tasks (once per process)
 
 MAX_HISTORY = 8          # latest N messages sent to the model (saves tokens)
 MAX_TOOL_CHARS = 1500     # cap on note text returned by read_note
@@ -1279,10 +1271,10 @@ def ask_agent(text: str, thread_id: str = "default", resume=None) -> dict:
             # Auto-save location when user replies to the "Which area and city?"
             # prompt from find_places/get_my_location.
             try:
-                import streamlit as st
-                if st.session_state.get("places_location_asked"):
+                from .cache import get_state as _get_state, set_state as _set_state
+                if _get_state("places_location_asked"):
                     _saved = save_location.invoke({"label": text.strip()})
-                    st.session_state["places_location_asked"] = False
+                    _set_state("places_location_asked", False)
                     return {"reply": _saved + " Location saved - please ask again for nearby places.",
                             "tools": ["save_location"], "error": None, "pending": None}
             except Exception:

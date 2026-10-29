@@ -132,6 +132,7 @@ def me_endpoint(request: Request):
     return _auth_me(request)
 
 
+@app.get("/health")
 @app.get("/api/health")
 def health() -> Dict[str, str]:
     return {"status": "ok"}
@@ -145,10 +146,27 @@ def _mount_spa() -> None:
     if not _DIST.exists() or not (_DIST / "index.html").exists():
         return
     try:
+        from fastapi.responses import FileResponse  # noqa: PLC0415
         from fastapi.staticfiles import StaticFiles  # noqa: PLC0415
 
-        app.mount("/", StaticFiles(directory=str(_DIST), html=True), name="spa")
-    except Exception:
+        # Serve built assets (JS/CSS) directly.
+        app.mount(
+            "/assets",
+            StaticFiles(directory=str(_DIST / "assets")),
+            name="assets",
+        )
+
+        # SPA fallback: any non-/api route returns index.html.
+        @app.get("/{full_path:path}")
+        async def spa_fallback(full_path: str):
+            if full_path.startswith("api/") or full_path == "api":
+                # Should never happen if passthrough routes matched first, but
+                # keep a clear 404 to avoid shadowing the API.
+                from fastapi import HTTPException  # noqa: PLC0415
+
+                raise HTTPException(status_code=404, detail="not found")
+            return FileResponse(_DIST / "index.html")
+    except Exception as _e:
         pass
 
 

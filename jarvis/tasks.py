@@ -31,12 +31,11 @@ if _raw_db_env:
 else:
     DB_PATH = BASE_DIR / "jarvis.db"
 import logging as _bootstrap_logging  # noqa: PLC0415
-
+_jlog = _bootstrap_logging.getLogger("jarvis")
+_jlog.setLevel(_bootstrap_logging.INFO)
 if str(DB_PATH).startswith(("/tmp", "/var/tmp")):
-    _bootstrap_logging.getLogger("jarvis").warning(
-        "WARNING: DB path points inside /tmp (may not persist): %s", DB_PATH
-    )
-_bootstrap_logging.getLogger("jarvis").info("DB_PATH resolved to: %s", DB_PATH)
+    _jlog.warning("WARNING: DB path points inside /tmp (may not persist): %s", DB_PATH)
+_jlog.warning("DB_PATH resolved to: %s", DB_PATH)
 
 PRIORITIES = ("low", "normal", "high", "urgent")
 
