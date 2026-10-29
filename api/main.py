@@ -48,6 +48,43 @@ _SECURITY_HEADERS = {
 }
 
 
+def _is_dummy_key(key: str) -> bool:
+    k = (key or "").strip().lower()
+    if not k:
+        return True
+    if len(k) < 20:
+        return True
+    if k in {"dummy", "test", "invalid", "fake", "xxx", "placeholder", "none", "dummy_timeout"}:
+        return True
+    if k.startswith(("dummy", "fake", "placeholder")):
+        return True
+    return False
+
+
+def validate_startup() -> None:
+    """Raise SystemExit if startup is unsafe (dummy/missing key) unless fake/test mode."""
+    if os.environ.get("JARVIS_FAKE_AGENT") or os.environ.get("JARVIS_TEST_MODE"):
+        return
+    key = os.environ.get("GROQ_API_KEY", "")
+    if _is_dummy_key(key):
+        print(
+            "ERROR: GROQ_API_KEY is missing, empty, 'dummy', or otherwise invalid. "
+            "Set a real key in .env (or export JARVIS_FAKE_AGENT=1 for test/fake-agent mode).",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+
+def validate_bind_host(host: str) -> bool:
+    """Loopback-only binding unless --allow-remote / JARVIS_ALLOW_REMOTE=1."""
+    loopback = {"127.0.0.1", "localhost", "::1"}
+    if host in loopback:
+        return True
+    if os.environ.get("JARVIS_ALLOW_REMOTE") or os.environ.get("JARVIS_ALLOW_REMOTE_FLAG"):
+        return True
+    return False
+
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
@@ -171,3 +208,20 @@ def _mount_spa() -> None:
 
 
 _mount_spa()
+
+
+if __name__ == "__main__":
+    import argparse
+    import uvicorn
+    parser = argparse.ArgumentParser(description='JARVIS API launcher')
+    parser.add_argument('--host', default='127.0.0.1')
+    parser.add_argument('--port', type=int, default=8000)
+    parser.add_argument('--allow-remote', action='store_true')
+    args = parser.parse_args()
+    if not validate_bind_host(args.host):
+        print('ERROR: refusing to bind to non-loopback host %r. Use --host 127.0.0.1 or --allow-remote (env JARVIS_ALLOW_REMOTE=1) for safe operation.' % args.host, file=sys.stderr)
+        sys.exit(1)
+    if args.allow_remote:
+        os.environ['JARVIS_ALLOW_REMOTE']='1'
+    validate_startup()
+    uvicorn.run(app, host=args.host, port=args.port)

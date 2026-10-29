@@ -20,8 +20,21 @@ export function SettingsPage() {
   }, [auth.loading, auth.user, navigate])
 
   async function load() {
-    try { const d: any = await api.GET('/api/settings'); setS(d); setLoc(d?.home_location || ''); setMc(d?.model_complex || ''); setMs(d?.model_simple || ''); setCap(d?.groq_daily_token_cap || 200000); setAliases(d?.fast_path_aliases || '') } catch (e: any) { setMsg(e?.message || 'Failed') }
+    try {
+      const d: any = await api.GET('/api/settings')
+      setS(d)
+      setLoc('')
+      setMc(d?.model_complex || '')
+      setMs(d?.model_simple || '')
+      setCap(d?.groq_daily_token_cap || 200000)
+      setAliases(d?.fast_path_aliases || '')
+    } catch (e: any) { setMsg(e?.message || 'Failed') }
   }
+
+  const savedLocationLabel = (() => {
+    if (!s?.home_location) return null
+    try { const j = JSON.parse(s.home_location); return `${j.label} (${Number(j.lat).toFixed(2)}, ${Number(j.lon).toFixed(2)})` } catch { return s.home_location }
+  })()
 
   async function save() {
     setMsg('')
@@ -86,9 +99,7 @@ export function SettingsPage() {
       <h2>Settings</h2>
       <section className="card">
         <h3>Home location (for ‘find nearby places’)</h3>
-        {s.home_location && <p className="muted small">Saved: {(() => {
-          try { const j = JSON.parse(s.home_location); return `${j.label} (${Number(j.lat).toFixed(2)}, ${Number(j.lon).toFixed(2)})` } catch { return s.home_location }
-        })()}</p>}
+        {savedLocationLabel && <p className="muted small">Saved: {savedLocationLabel}</p>}
         {!s.home_location && <p className="muted small">No location saved — set one below.</p>}
         <p className="muted small">Tip: paste an address/city, a Google Maps link, or lat, lon.</p>
         <input className="input" placeholder="e.g. Marine Drive, Mumbai" value={loc} onChange={(e) => setLoc(e.target.value)} />

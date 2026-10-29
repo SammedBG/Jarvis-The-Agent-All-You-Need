@@ -218,6 +218,34 @@ def approve(request: Request, payload: ApprovePayload, user: dict = Depends(requ
     else:
         resume_obj = {"approved": False, "feedback": payload.feedback or ""}
     try:
+        if not payload.approved:
+            # always log a decline to Activity (never client-supplied args)
+            try:
+                from jarvis.tasks import log_tool_activity  # noqa: PLC0415
+
+                log_tool_activity(
+                    "approval_decided",
+                    {"id": payload.id},
+                    "User declined.",
+                    status="declined",
+                )
+            except Exception:
+                pass
+            try:
+                from jarvis.agent import get_pending  # noqa: PLC0415
+
+                config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 50}
+                pending = get_pending(config)
+                if pending is not None:
+                    for a_ in pending.get("actions", []):
+                        log_tool_activity(
+                            a_.get("name", "approval"),
+                            a_.get("args") or {},
+                            "User declined.",
+                            status="declined",
+                        )
+            except Exception:
+                pass
         from jarvis.agent import ask_agent  # noqa: PLC0415
 
         result = ask_agent("", thread_id=thread_id, resume=resume_obj)

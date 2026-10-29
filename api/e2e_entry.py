@@ -30,7 +30,7 @@ try:
     if not tasks_mod._conn.execute("SELECT 1 FROM auth_users WHERE is_owner=1").fetchone():
         tasks_mod._conn.execute(
             "INSERT OR IGNORE INTO auth_users (username, password_hash, created_at, is_owner) VALUES (?,?,?,1)",
-            ("owner", _PH().hash("supersecret1234"), "2026-01-01T00:00:00"),
+            ("samxtech", _PH().hash("supersecret1234"), "2026-01-01T00:00:00"),
         )
         tasks_mod._conn.commit()
 except Exception:
@@ -97,4 +97,3 @@ except Exception:
     pass
 
 from api.main import app  # noqa: E402
-PY
