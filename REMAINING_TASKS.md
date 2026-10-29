@@ -8,8 +8,11 @@ This file lists project work still to be done.
 - Documents upload/list/search needs backend route check or a clear not available state.
 
 ## README and requirements
-- Keep README synced with code and verified commands.
+- Keep README synced with code and verified commandvs.
 - Polish package/version pins in requirements lock.
+
+
+
 - Document desktop-only package install flow on Windows.
 
 ## Failure paths testing
