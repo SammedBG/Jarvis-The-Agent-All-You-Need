@@ -70,7 +70,23 @@ if MODEL_NAME.startswith("groq:") and not os.getenv("GROQ_API_KEY"):
 
 NOTES_DIR = BASE_DIR / "notes"
 NOTES_DIR.mkdir(exist_ok=True)
-DB_PATH = Path(os.environ.get("JARVIS_DB", os.environ.get("AGNET_TASKS_DB", BASE_DIR / "jarvis.db")))
+_raw_db_env = os.environ.get("JARVIS_DB", os.environ.get("AGNET_TASKS_DB", ""))
+if _raw_db_env:
+    _candidate = Path(_raw_db_env)
+    if not _candidate.is_absolute():
+        _candidate = BASE_DIR / _candidate
+    DB_PATH = _candidate
+else:
+    DB_PATH = BASE_DIR / "jarvis.db"
+if str(DB_PATH).startswith(("/tmp", "/var/tmp")):
+    import logging as _logging  # noqa: PLC0415
+
+    _logging.getLogger("jarvis").warning(
+        "WARNING: DB path points inside /tmp (may not persist): %s", DB_PATH
+    )
+    import logging as _l2  # noqa: PLC0415
+
+    _l2.getLogger("jarvis").info("DB_PATH resolved to: %s", DB_PATH)
 
 MAX_HISTORY = 8          # latest N messages sent to the model (saves tokens)
 MAX_TOOL_CHARS = 1500     # cap on note text returned by read_note

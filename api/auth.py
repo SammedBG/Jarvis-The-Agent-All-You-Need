@@ -437,6 +437,24 @@ def logout(request: Request, response: Response):
     return {"ok": True}
 
 
+@router.post("/logout-all")
+def logout_all(request: Request, response: Response):
+    """Revoke every session for the current user."""
+    _check_origin(request)
+    _require_csrf(request)
+    session = get_session_from_request(request)
+    if not session:
+        raise HTTPException(status_code=HTTP_401_UNAUTHORIZED, detail="not authenticated")
+    conn = _db()
+    try:
+        conn.execute("DELETE FROM auth_sessions WHERE user_id=?", (session["id"],))
+        conn.commit()
+    finally:
+        conn.close()
+    response.delete_cookie("session", path="/")
+    return {"ok": True}
+
+
 @router.get("/me")
 def me(request: Request):
     """Current user + CSRF token (needed for mutating requests)."""

@@ -38,10 +38,12 @@ _SECURITY_HEADERS = {
         "script-src 'self'; "
         "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data:; "
+        "media-src 'self' blob:; "
         "connect-src 'self'; "
         "font-src 'self'; "
         "object-src 'none'; "
-        "base-uri 'self';"
+        "base-uri 'self'; "
+        "frame-ancestors 'none';"
     ),
 }
 
@@ -133,3 +135,21 @@ def me_endpoint(request: Request):
 @app.get("/api/health")
 def health() -> Dict[str, str]:
     return {"status": "ok"}
+
+
+# ---- SPA hosting: serve built frontend (never shadows /api) ----
+_DIST = BASE_DIR / "web" / "dist"
+
+
+def _mount_spa() -> None:
+    if not _DIST.exists() or not (_DIST / "index.html").exists():
+        return
+    try:
+        from fastapi.staticfiles import StaticFiles  # noqa: PLC0415
+
+        app.mount("/", StaticFiles(directory=str(_DIST), html=True), name="spa")
+    except Exception:
+        pass
+
+
+_mount_spa()

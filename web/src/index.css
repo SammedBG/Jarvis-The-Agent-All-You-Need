@@ -1,0 +1,164 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --c-bg: #262624;
+  --c-surface: #1f1f1d;
+  --c-panel: #2d2d2a;
+  --c-border: #3a3a37;
+  --c-accent: #e97556;
+  --c-accent-soft: #e9755622;
+  --c-text: #ece9e1;
+  --c-muted: #9b978e;
+  --c-success: #6fb38f;
+  --c-danger: #d96a6a;
+
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-pill: 999px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+
+  --font-body: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --fs-sm: 14px;
+  --fs-md: 16px;
+  --fs-lg: 20px;
+  --fs-xl: 28px;
+  --lh-body: 1.6;
+}
+
+:root[data-theme="light"] {
+  --c-bg: #fafaf8;
+  --c-surface: #ffffff;
+  --c-panel: #f0efea;
+  --c-border: #dddcd6;
+  --c-accent: #d45e3a;
+  --c-accent-soft: #d45e3a22;
+  --c-text: #1f1f1d;
+  --c-muted: #6b6861;
+  --c-success: #4a9270;
+  --c-danger: #b84a4a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--c-bg);
+  color: var(--c-text);
+  font-family: var(--font-body);
+  font-size: var(--fs-md);
+  line-height: var(--lh-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+button, input, textarea {
+  font-family: inherit;
+  font-size: inherit;
+  outline: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+}
+
+textarea {
+  resize: none;
+}
+
+a { color: var(--c-accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.card { background: var(--c-surface); border: 1px solid var(--c-border); border-radius: 12px; padding: 1rem; }
+.dialog-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.btn { padding: 0.5rem 1rem; border-radius: 8px; border: 1px solid var(--c-border); background: var(--c-panel); color: var(--c-text); cursor: pointer; }
+.btn-secondary { background: var(--c-surface); }
+.dialog-row.push { justify-content: flex-end; }
+.assist-block { margin-top: 8px; }
+.assist-title { font-weight: 600; font-size: 13px; color: var(--c-muted); margin-bottom: 4px; }
+.assist-ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.assist-row { display: flex; gap: 8px; align-items: center; }
+.assist-check { margin: 0; }
+.time { margin-left: auto; }
+.chip { padding: 6px 12px; border: 1px solid var(--c-border); border-radius: 999px; background: var(--c-panel); color: var(--c-text); cursor: pointer; font-size: 14px; }
+.chip-active { background: var(--c-accent); color: var(--c-bg); border-color: var(--c-accent); }
+.error-card { border: 1px solid var(--c-border); background: var(--c-surface); padding: 12px; border-radius: 12px; }
+.relative { position: relative; }
+
+/* Auth + shell primitives */
+.app-shell-center {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+  background: var(--c-bg);
+}
+.card.auth-card {
+  width: 100%;
+  max-width: 400px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  padding: 32px 24px;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+}
+.brand { font-size: 24px; font-weight: 600; margin: 0; }
+.muted { color: var(--c-muted); font-size: 14px; margin: 0; }
+.small { font-size: 13px; }
+.label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--c-muted);
+  width: 100%;
+}
+.input {
+  width: 100%;
+  font-size: 16px;
+  line-height: 1.4;
+  padding: 10px 12px;
+  color: var(--c-text);
+  background: var(--c-panel);
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  outline: none;
+}
+.input:focus {
+  border-color: var(--c-accent);
+  box-shadow: 0 0 0 2px var(--c-accent-soft);
+}
+.reveal {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  background: transparent; border: none; color: var(--c-muted);
+  cursor: pointer; font-size: 13px; padding: 4px 8px;
+}
+.relative { position: relative; }
+.btn-primary {
+  width: 100%;
+  font-size: 16px;
+  padding: 10px 12px;
+  border: none; border-radius: 8px;
+  background: var(--c-accent); color: var(--c-bg); font-weight: 600;
+  cursor: pointer;
+}
+.btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+.error-text { color: var(--c-danger); font-size: 13px; }

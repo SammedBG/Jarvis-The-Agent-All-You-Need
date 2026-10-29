@@ -237,6 +237,29 @@ For scaling / multi-user: `tasks`/`rules`/`decisions` tables already have a `use
 
 ---
 
+## Web frontend (React)
+
+```bash
+# in a separate terminal: start the API backend
+cd /home/rokkun-23/Desktop/Agnet_Example
+uvicorn api.main:app --host 127.0.0.1 --port 8000
+
+# start the React dev server (proxies /api -> 127.0.0.1:8000)
+cd web
+npm install
+npm run dev
+```
+
+The built frontend is served by FastAPI at `/` (after `npm run build`). The dev server proxies API requests with credentials so the HttpOnly session cookie survives.
+
+Dev server runs on port 5173 (`http://127.0.0.1:5173`). For CORS during development, set in `.env`:
+
+```
+JARVIS_ALLOWED_ORIGINS=http://127.0.0.1:5173,http://localhost:5173
+```
+
+By default only same-origin (`http://127.0.0.1:8000`) is allowed. Production runs on port 8000 with no extra configuration.
+
 ## License
 
 Personal use. You own your data — everything lives in local SQLite databases on your machine.
