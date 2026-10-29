@@ -503,7 +503,7 @@ def render_chat_daily_briefing() -> None:
 
     with st.container(border=True):
         st.markdown("**Daily briefing**")
-        hc1, hc2, hc3, hc4 = st.columns([6, 1, 1, 1], vertical_alignment="center")
+        hc1, hc2, hc3, hc4 = st.columns([3, 1.6, 1.6, 1.8], vertical_alignment="center")
         HC_DATE = datetime.now().strftime("%A, %d %b").replace(" 0", " ")
         hc1.caption(HC_DATE)
         hc1.caption(f"{today_n} due today \u00b7 {overdue_n} overdue")
@@ -530,10 +530,12 @@ def render_chat_daily_briefing() -> None:
                 pass
             from jarvis.tts import player_html
             pass
-        if hc2.button("Play briefing \U0001F50A", help="Read short spoken briefing"):
+        if hc2.button("Play briefing \U0001F50A", help="Read short spoken briefing",
+                     width="stretch"):
             _play()
             st.rerun()
-        if hc3.button("Refresh", help="Rebuild briefing from current data"):
+        if hc3.button("Refresh", help="Rebuild briefing from current data",
+                     width="stretch"):
             try:
                 app_briefing.clear_today()
                 text = app_briefing.generate()
@@ -542,7 +544,8 @@ def render_chat_daily_briefing() -> None:
                 st.error("Could not rebuild the briefing. Retry")  # never raw error
             st.cache_data.clear()
             st.rerun()
-        if hc4.button("Dismiss for today", help="Hide until tomorrow"):
+        if hc4.button("Dismiss for today", help="Hide until tomorrow",
+                     width="stretch"):
             from datetime import date as _d
             app_briefing.set_setting("briefing_dismissed_date", _d.today().isoformat())
             st.rerun()

@@ -63,6 +63,15 @@ _EXTRA_CSS = """
 @media (max-width: 768px) { .st-key-home_send button, .st-key-home_attach button,
   .st-key-home_msg input, .st-key-home_audio { height: 2.4rem; } }
 .block-container code { font-size: .85rem; line-height: 1.5; }
+/* briefing card action buttons: prevent text truncation */
+.st-key-home_send button, .st-key-home_attach button { min-width: 44px; }
+/* voice recording bar: cleaner dots, better height */
+.stAudio [data-testid="stAudioInput"] { margin-top: .2rem; }
+.stAudio audio { width: 100%; height: 2.4rem; }
+/* home suggestion chips */
+.st-key-chip_row button { border-radius: 20px; font-size: .85rem; min-height: 2.2rem; }
+/* tighter spacing between home card sections */
+.block-container > div:first-child { margin-bottom: 1rem; }
 """
 
 

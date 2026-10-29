@@ -7,7 +7,9 @@ Navigation only: it sets up the page config, the shared chrome-hiding CSS,
 and the sidebar navigation, then runs the selected page from app_pages/.
 """
 import os
+import sys
 from datetime import date, datetime, timedelta
+from pathlib import Path
 
 import streamlit as st
 from ui_theme import inject_theme
@@ -19,7 +21,6 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Shared theme (one injection)
 inject_theme()
 
 # Background reminder watcher
@@ -30,26 +31,29 @@ from jarvis.app_briefing import get_setting, set_setting
 app_reminders.ensure_watcher()
 
 # --------------------------------------------------------------------------
-# Navigation pages (rendered in sidebar)
+# Navigation pages (string paths + st.Page objects)
 # --------------------------------------------------------------------------
 
 NAV_PAGES = [
-    st.Page("app_pages/chat.py", title="Chat", icon=":material/chat:", default=True),
-    st.Page("app_pages/today.py", title="Today", icon=":material/calendar_today:"),
-    st.Page("app_pages/tasks.py", title="Tasks", icon=":material/checklist:"),
-    st.Page("app_pages/settings.py", title="Settings", icon=":material/settings:"),
+    ("app_pages/chat.py", "Chat", ":material/chat:", True),
+    ("app_pages/today.py", "Today", ":material/calendar_today:", False),
+    ("app_pages/tasks.py", "Tasks", ":material/checklist:", False),
+    ("app_pages/settings.py", "Settings", ":material/settings:", False),
 ]
 NAV_DATA_PAGES = [
-    st.Page("app_pages/memory.py", title="Memory", icon=":material/psychology:"),
-    st.Page("app_pages/activity.py", title="Activity", icon=":material/receipt_long:"),
-    st.Page("app_pages/documents.py", title="Documents", icon=":material/description:"),
-    st.Page("app_pages/usage.py", title="Usage", icon=":material/insights:"),
+    ("app_pages/memory.py", "Memory", ":material/psychology:", False),
+    ("app_pages/activity.py", "Activity", ":material/receipt_long:", False),
+    ("app_pages/documents.py", "Documents", ":material/description:", False),
+    ("app_pages/usage.py", "Usage", ":material/insights:", False),
 ]
+
+nav_pages = [st.Page(p, title=t, icon=i, default=d) for p, t, i, d in NAV_PAGES]
+nav_data_pages = [st.Page(p, title=t, icon=i, default=d) for p, t, i, d in NAV_DATA_PAGES]
 
 nav = st.navigation(
     {
-        "": NAV_PAGES,
-        "Your data": NAV_DATA_PAGES,
+        "": nav_pages,
+        "Your data": nav_data_pages,
     },
     position="sidebar",
 )
@@ -58,8 +62,6 @@ nav = st.navigation(
 # sidebar helpers
 # --------------------------------------------------------------------------
 
-import sys
-from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 try:
@@ -114,22 +116,19 @@ def _render_recents(tid: str) -> None:
 
 
 # --------------------------------------------------------------------------
-# sidebar chrome (renders after nav groups)
+# sidebar chrome (renders after nav groups in the same sidebar)
 # --------------------------------------------------------------------------
 
 with st.sidebar:
-    # Brand at top of sidebar chrome
     st.markdown('<div class="side-brand"><span class="spark">✳</span> JARVIS</div>',
                 unsafe_allow_html=True)
 
-    # New chat
     if st.button("+ New chat", icon=":material/add:", width="stretch", key="new_chat"):
         st.query_params["t"] = f"ui-{datetime.now():%Y%m%d-%H%M%S}"
         st.session_state.messages = []
         st.session_state.pending = None
         st.rerun()
 
-    # Search chats
     st.markdown('<div class="side-label">Search chats</div>', unsafe_allow_html=True)
     sq = st.text_input("Search conversations", label_visibility="collapsed",
                        placeholder="Search conversations…", key="chat_search_q")
@@ -145,12 +144,35 @@ with st.sidebar:
         else:
             st.caption("No matches.")
 
-    # Recents grouped Today / Yesterday / Earlier
     _render_recents(st.query_params.get("t", "ui-main"))
 
     st.divider()
 
-    # Quota bar
+    st.markdown('<div class="side-label">Navigation</div>', unsafe_allow_html=True)
+    for path_str, title, icon, _ in NAV_PAGES:
+        selected = path_str == st.query_params.get("t", "")
+        if st.button(f"{icon} {title}", key=f"nav_{path_str}",
+                     width="stretch",
+                     type="primary" if selected else "secondary"):
+            st.query_params["t"] = path_str
+            st.rerun()
+
+    st.markdown('<div class="side-label">Your data</div>', unsafe_allow_html=True)
+    for path_str, title, icon, _ in NAV_DATA_PAGES:
+        if st.button(f"{icon} {title}", key=f"nav_data_{path_str}",
+                     width="stretch"):
+            st.query_params["t"] = path_str
+            st.rerun()
+
+    st.divider()
+
+    if st.button("Settings", icon=":material/settings:", width="stretch",
+                 key="nav_settings"):
+        st.query_params["t"] = "app_pages/settings.py"
+        st.rerun()
+
+    st.divider()
+
     st.markdown('<div class="side-label">Today · Quota</div>', unsafe_allow_html=True)
     _today_prefix = datetime.now().strftime("%Y-%m-%d")
     _qused = 0
@@ -166,7 +188,6 @@ with st.sidebar:
     qtxt = "%dk / %dk tokens" % (round(_qused / 1000), round(_qlimit / 1000))
     st.progress(min(1.0, _qused / _qlimit or .001), text=qtxt)
 
-    # Friendly model name
     _MODEL_LABELS = {
         "groq:openai/gpt-oss-120b": "JARVIS 120B",
         "groq:openai/gpt-oss-20b": "JARVIS 20B",
@@ -174,7 +195,6 @@ with st.sidebar:
     _model_name = agent.MODEL_NAME if agent else "groq:openai/gpt-oss-20b"
     st.caption(_MODEL_LABELS.get(_model_name, _model_name.split("/")[-1].replace("-", " ").title()))
 
-    # Voice toggle
     if "voice_replies" not in st.session_state:
         st.session_state.voice_replies = get_setting("voice_replies", "0") == "1"
 
@@ -184,7 +204,6 @@ with st.sidebar:
     st.toggle("Read replies aloud", key="voice_replies", on_change=_save_voice,
               help="Speaks every new answer with a neural voice")
 
-    # Stop button: only while speech is playing
     if st.session_state.get("voice_play_pending") or st.session_state.get("voice_playing"):
         if st.button("Stop", key="voice_stop", width="stretch",
                      icon=":material/stop:", help="Cut the currently playing answer."):
@@ -204,7 +223,6 @@ with st.sidebar:
 
 @st.fragment(run_every=15)
 def briefing_watch() -> None:
-    """Proactive half: ... (skip on Chat home, handled by app_pages/chat.py)"""
     if (st.query_params.get("t", "").startswith("ui-")
             and not (st.session_state.get("messages") or [])):
         return
@@ -229,7 +247,6 @@ def briefing_watch() -> None:
 
 @st.fragment(run_every=15)
 def reminder_watch() -> None:
-    """In-app half: toast + banner for newly-due tasks."""
     due = app_reminders.due_now()
     seen = st.session_state.setdefault("reminders_seen", set())
     for r in due:
@@ -263,3 +280,5 @@ def reminder_watch() -> None:
 
 reminder_watch()
 briefing_watch()
+
+nav.run()
