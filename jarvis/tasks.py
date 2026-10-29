@@ -198,48 +198,6 @@ def log_conversation(thread_id: str | None, text: str, user_id: int = 1) -> None
         pass
 
 
-def search_conversations(query: str, limit: int = 8) -> list[dict]:
-    """Full-text (FTS5) search over past turns. Returns list of dicts
-    {thread_id, ts, snippet}. Sanitizes the query so no FTS syntax crashes."""
-    q = (query or "").strip()
-    if not q:
-        return []
-    safe = re.sub(r"[^a-zA-Z0-9\s\-_]", " ", q).strip()
-    if len(safe) < 2:
-        return []
-    limit = max(1, min(int(limit), 50))
-    out = []
-    try:
-        rows = _conn.execute(
-            "SELECT cl.thread_id, cl.ts, cl.text FROM conversation_fts f "
-            "JOIN conversation_log cl ON cl.id = f.rowid "
-            "WHERE conversation_fts MATCH ? ORDER BY cl.ts DESC LIMIT ?",
-            (safe, limit),
-        ).fetchall()
-        for r in rows:
-            snippet = str(r["text"] or "").replace("\n", " ").strip()[:160]
-            tail = "" if len(str(r["text"] or "")) <= 160 else "…"
-            out.append({"thread_id": r["thread_id"], "ts": r["ts"],
-                        "snippet": f"{snippet}{tail}"})
-    except sqlite3.Error:
-        pass
-    if not out:
-        try:
-            rows = _conn.execute(
-                "SELECT thread_id, text, ts FROM conversation_log WHERE text LIKE ? "
-                "ORDER BY ts DESC LIMIT ?", (f"%{safe}%", limit)
-            ).fetchall()
-            for r in rows:
-                txt = str(r[1] or "")
-                snippet = txt.replace("\n", " ").strip()[:160]
-                tail = "" if len(txt) <= 160 else "…"
-                out.append({"thread_id": r[0], "ts": r[2],
-                            "snippet": f"{snippet}{tail}"})
-        except sqlite3.Error:
-            pass
-    return out
-
-
 def prune_checkpoints(keep_per_thread: int = 50) -> int:
     """Delete checkpoints beyond the last `keep_per_thread` per thread.
 

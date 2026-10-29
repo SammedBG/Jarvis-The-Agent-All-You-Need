@@ -48,7 +48,8 @@ except (Exception, SystemExit) as e:  # e.g. missing GROQ_API_KEY raises SystemE
 from jarvis.app_briefing import get_setting, set_setting
 from jarvis import app_briefing
 from jarvis import app_data
-from jarvis.tasks import latest_usage, search_conversations
+from jarvis.conversations import recent_conversations, search_conversations
+from jarvis.tasks import latest_usage
 from jarvis.tts import player_html, speak
 
 
@@ -101,27 +102,6 @@ def conversation_title(thread_id: str, checkpoint_id: str) -> str:
                 text = text + "…"
             return text[:40] or "(untitled)"
     return ""
-
-
-def recent_conversations(limit: int = 12) -> list:
-    """[(thread_id, title), ...] newest first, for the sidebar."""
-    try:
-        conn = sqlite3.connect(str(agent.DB_PATH), timeout=3)
-        try:
-            rows = conn.execute(
-                "SELECT thread_id, MAX(checkpoint_id) FROM checkpoints WHERE thread_id LIKE 'ui-%' "
-                "GROUP BY thread_id ORDER BY MAX(checkpoint_id) DESC LIMIT ?", (limit,)
-            ).fetchall()
-        finally:
-            conn.close()
-    except Exception:
-        return []
-    out = []
-    for thread_id, ckpt in rows:
-        title = conversation_title(thread_id, str(ckpt))
-        if title:
-            out.append((thread_id, title))
-    return out
 
 
 def _desktop_confirmation(actions: list[tuple[str, dict]]) -> str:
