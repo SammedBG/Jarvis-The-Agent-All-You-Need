@@ -21,7 +21,15 @@ from typing import List, Tuple
 from langchain_core.tools import tool
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DB_PATH = Path(os.environ.get("JARVIS_DB", os.environ.get("AGNET_TASKS_DB", BASE_DIR / "jarvis.db")))
+_raw_db_env = os.environ.get("JARVIS_DB", os.environ.get("AGNET_TASKS_DB", ""))
+if _raw_db_env:
+    _candidate = Path(_raw_db_env)
+    if not _candidate.is_absolute():
+        _candidate = BASE_DIR / _candidate
+    DB_PATH = _candidate
+else:
+    DB_PATH = BASE_DIR / "jarvis.db"
+# logging handled in jarvis.tasks (once per process)
 
 MAX_FACT_CHARS = 300
 MIN_FACT_CHARS = 3

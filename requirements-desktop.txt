@@ -1,0 +1,6 @@
+# Optional dependencies for the PyQt desktop overlay and global hotkey.
+# Install after requirements.txt in the project's virtual environment.
+PyQt6>=6.6
+pynput>=1.7
+sounddevice>=0.4
+pyttsx3>=2.90

@@ -1,0 +1,4 @@
+# Dev / test tools
+pytest>=9.0
+httpx>=0.28
+playwright>=1.49

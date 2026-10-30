@@ -7,8 +7,6 @@ import streamlit as st
 from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from ui_theme import inject_theme
-inject_theme(1100)
 st.title(":material/receipt_long: Activity log")
 st.caption("Every tool call, when it ran, what it got, and why it was approved/declined. "
            "Secrets are redacted before storage.")

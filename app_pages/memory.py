@@ -8,8 +8,6 @@ import streamlit as st
 from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from ui_theme import inject_theme
-inject_theme(1080)
 st.title(":material/psychology: Memory")
 
 import jarvis.memory as long_memory  # noqa: E402

@@ -1,5 +1,4 @@
-# Core
-streamlit>=1.40
+# Core (API + agent + RAG + voice). No Streamlit here anymore.
 langchain>=1.0
 langchain-core>=1.0
 langchain-groq>=1.0
@@ -8,7 +7,12 @@ langgraph-checkpoint-sqlite>=3.0
 groq>=0.30
 python-dotenv>=1.0
 requests>=2.31
-fastembed>=0.4
+fastapi>=0.104
+uvicorn>=0.24
+sse-starlette>=3.6
+argon2-cffi>=23.1
+python-multipart>=0.0.6
+fastembed>=0.8
 numpy>=1.24
 pandas>=2.0
 pypdf>=4.0
@@ -17,20 +21,3 @@ ddgs>=9.0
 Pillow>=10.0
 mss>=9.0
 psutil>=5.9
-
-# Desktop overlay + voice
-PyQt6>=6.6
-pynput>=1.8
-sounddevice>=0.4
-openwakeword>=0.6
-onnxruntime>=1.17
-edge-tts>=6.1
-pyttsx3>=2.90
-
-# Linux only
-dbus-next>=0.2; sys_platform == "linux"
-
-# Windows only
-pycaw>=20220701; sys_platform == "win32"
-screen-brightness-control>=0.20; sys_platform == "win32"
-win10toast>=0.9; sys_platform == "win32"

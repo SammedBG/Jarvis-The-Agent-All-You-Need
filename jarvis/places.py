@@ -22,6 +22,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
+from .cache import get_state, set_state, clear_state
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 LOCATION_KEY = "home_location"
 
@@ -51,8 +53,7 @@ def get_my_location() -> str:
     except Exception:
         pass
     try:
-        import streamlit as st
-        st.session_state["places_location_asked"] = True
+        set_state("places_location_asked", True)
     except Exception:
         pass
     return ("No location saved. Ask the user once: 'Which area and city are you in?' "
@@ -81,8 +82,7 @@ def save_location(label: str) -> str:
         return f"Saved in-memory, but DB write failed: {e}"
     # location is now saved: reset the ask-once flag so the next search proceeds
     try:
-        import streamlit as st
-        st.session_state["places_location_asked"] = False
+        set_state("places_location_asked", False)
     except Exception:
         pass
     return f"Saved location {label} (this is stored; coords rounded on display: " \
@@ -481,7 +481,9 @@ def _osm_fetch(query: str, lat: float, lon: float, radius_m: int) -> list[dict]:
                             lat=float(elat), lon=float(elon),
                             addr=tags.get("addr:full") or tags.get("addr:street") or "(no address)",
                             open_now=None,
-                            maps=_osm_maps_url(lat, lon, name),
+                            # Link to the actual result, not the center of the
+                            # user's saved search location.
+                            maps=_osm_maps_url(float(elat), float(elon), name),
                             dist_m=dist_m,
                         ))
                     if out:
@@ -532,7 +534,7 @@ def _osm_fetch(query: str, lat: float, lon: float, radius_m: int) -> list[dict]:
                     lat=elat, lon=elon,
                     addr=item.get("display_name", "(no address)"),
                     open_now=None,
-                    maps=_osm_maps_url(lat, lon, name),
+                    maps=_osm_maps_url(elat, elon, name),
                     dist_m=_haversine(lat, lon, elat, elon),
                 ))
             if out:
@@ -632,10 +634,9 @@ def find_places(query: str, radius_m: int = 3000, open_now: bool = True,
         # Never ask twice in the same session; never ask for coordinates.
         already_asked = False
         try:
-            import streamlit as st
-            already_asked = bool(st.session_state.get("places_location_asked", False))
+            already_asked = bool(get_state("places_location_asked", False))
             if not already_asked:
-                st.session_state["places_location_asked"] = True
+                set_state("places_location_asked", True)
         except Exception:
             pass
         if already_asked:

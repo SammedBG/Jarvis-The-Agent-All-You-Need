@@ -9,8 +9,8 @@ Runs beside (not instead of) `streamlit run ui.py` - same agent brain, same
 memory, same tools, same voice replies.
 
 Requirements:
-    sudo apt install -y libportaudio2
-    .venv/bin/pip install PyQt6 pynput sounddevice numpy openwakeword
+    python -m pip install -r requirements.txt -r requirements-desktop.txt
+    Linux only: sudo apt install -y libportaudio2
 
 Run:
     .venv/bin/python jarvis_desktop.py
@@ -23,16 +23,24 @@ import tempfile
 import wave
 from pathlib import Path
 
-import numpy as np
-import sounddevice as sd
 from dotenv import load_dotenv
 
-from PyQt6.QtWidgets import (
-    QApplication, QSystemTrayIcon, QMenu, QWidget, QVBoxLayout, QPushButton,
-    QLabel, QFrame, QHBoxLayout, QGraphicsDropShadowEffect,
-)
-from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, pyqtSignal, QThread, QPoint
-from PyQt6.QtGui import QIcon, QKeySequence, QColor, QPainter, QLinearGradient, QBrush, QFont
+try:
+    import numpy as np
+    import sounddevice as sd
+    from PyQt6.QtWidgets import (
+        QApplication, QSystemTrayIcon, QMenu, QWidget, QVBoxLayout, QPushButton,
+        QLabel, QFrame, QHBoxLayout, QGraphicsDropShadowEffect,
+    )
+    from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, pyqtSignal, QThread, QPoint
+    from PyQt6.QtGui import QIcon, QKeySequence, QColor, QPainter, QLinearGradient, QBrush, QFont
+except (ImportError, OSError) as exc:
+    print(
+        "Desktop voice dependencies are missing or their native DLLs failed to load. "
+        "Install them in this virtual environment with: "
+        ".venv\\Scripts\\python.exe -m pip install -r requirements-desktop.txt"
+    )
+    raise SystemExit(1) from exc
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -114,19 +122,21 @@ def _speak(text: str) -> None:
             pass
 
 
-def _startup_greeting() -> None:
+def _startup_greeting() -> str:
     """Speak a time-aware greeting on login and prime the briefing."""
     from datetime import datetime
     import jarvis.app_reminders as ar
+    hour = datetime.now().hour
+    greet = "Good morning" if hour < 12 else "Good afternoon" if hour < 18 else "Good evening"
+    message = f"{greet}, sir. JARVIS online and standing by."
     try:
         import jarvis.app_briefing as ab
         if ab.get_setting("voice_announcements", "1") != "1":
-            return
+            return message
     except Exception:
         pass
-    hour = datetime.now().hour
-    greet = "Good morning" if hour < 12 else "Good afternoon" if hour < 18 else "Good evening"
-    ar._speak(f"{greet}, sir. JARVIS online and standing by.")
+    ar._speak(message)
+    return message
 
 
 # ---------------------------------------------------------------------------
@@ -136,6 +146,7 @@ def _startup_greeting() -> None:
 class JarvisWorker(QThread):
     status = pyqtSignal(str)
     result = pyqtSignal(str, str)   # user_text, jarvis_reply
+    error = pyqtSignal(str)
     finished_speaking = pyqtSignal()
 
     def run(self) -> None:
@@ -163,7 +174,8 @@ class JarvisWorker(QThread):
             _speak(reply)
             self.result.emit(text, reply)
         except Exception as e:
-            self.status.emit("Error.")
+            self.status.emit("Voice command failed.")
+            self.error.emit(str(e))
             print(f"[jarvis_desktop] {e}")
 
 
@@ -179,7 +191,10 @@ class Overlay(QWidget):
             | Qt.WindowType.WindowStaysOnTopHint
             | Qt.WindowType.Tool   # no taskbar entry
         )
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        # Translucent frameless windows can fail UpdateLayeredWindow on Windows,
+        # particularly with display scaling. The frame below is opaque.
+        if not sys.platform.startswith("win"):
+            self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFixedSize(OVERLAY_WIDTH, OVERLAY_HEIGHT)
 
         # position: centered horizontally, near the top of the screen
@@ -231,10 +246,11 @@ class Overlay(QWidget):
                 background: #c1124a;
             }
         """)
-        shadow = QGraphicsDropShadowEffect()
-        shadow.setBlurRadius(30)
-        shadow.setColor(QColor(0, 0, 0, 180))
-        frame.setGraphicsEffect(shadow)
+        if not sys.platform.startswith("win"):
+            shadow = QGraphicsDropShadowEffect()
+            shadow.setBlurRadius(30)
+            shadow.setColor(QColor(0, 0, 0, 180))
+            frame.setGraphicsEffect(shadow)
 
         layout = QVBoxLayout(frame)
         layout.setContentsMargins(24, 20, 24, 20)
@@ -247,7 +263,7 @@ class Overlay(QWidget):
         self.mic.setCursor(Qt.CursorShape.PointingHandCursor)
         self.mic.pressed.connect(self._start_listen)
 
-        self.status = QLabel("Press the hotkey, then click the mic", objectName="status")
+        self.status = QLabel("JARVIS online and ready - hold the mic to speak", objectName="status")
         self.status.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.result_label = QLabel("", objectName="result")
@@ -267,9 +283,13 @@ class Overlay(QWidget):
         self.worker = JarvisWorker()
         self.worker.status.connect(self.status.setText)
         self.worker.result.connect(self._show_result)
+        self.worker.error.connect(self._show_error)
+        self.worker.finished.connect(self._worker_finished)
         self.worker.finished_speaking.connect(self._auto_hide)
 
     def _start_listen(self) -> None:
+        if self.worker.isRunning():
+            return
         self.mic.setEnabled(False)
         self.result_label.setText("")
         self.status.setText("Listening...")
@@ -277,8 +297,15 @@ class Overlay(QWidget):
 
     def _show_result(self, user_text: str, reply: str) -> None:
         self.result_label.setText(f"You: {user_text}\nJARVIS: {reply}")
-        self.mic.setEnabled(True)
+        self.status.setText("JARVIS completed the request")
         QTimer.singleShot(AUTO_HIDE_MS, self.hide)
+
+    def _show_error(self, detail: str) -> None:
+        self.status.setText("JARVIS couldn't complete that command")
+        self.result_label.setText((detail or "Check microphone, GROQ_API_KEY, and network.")[:240])
+
+    def _worker_finished(self) -> None:
+        self.mic.setEnabled(True)
 
     def _auto_hide(self) -> None:
         self.hide()
@@ -287,7 +314,7 @@ class Overlay(QWidget):
         self.show()
         self.raise_()
         self.activateWindow()
-        self.status.setText("Press the mic to speak")
+        self.status.setText("JARVIS online and ready - hold the mic to speak")
         self.result_label.setText("")
 
 
@@ -319,6 +346,10 @@ class JarvisApp:
         # global hotkey (best effort - may not grab on Wayland)
         self._setup_hotkey()
 
+        # Show the voice surface immediately on launch instead of leaving new
+        # users with only a tray icon and no visible indication that JARVIS ran.
+        self.overlay.show_overlay()
+
         # start background watcher (reminders + morning briefing) so they
         # work even with no browser open
         app_reminders.ensure_watcher()
@@ -335,10 +366,13 @@ class JarvisApp:
         grad.setColorAt(1, QColor("#0f3460"))
         p.setBrush(QBrush(grad))
         p.setPen(QPen(Qt.PenStyle.NoPen))
-        p.drawEllipse(size * 0.22, size * 0.22, size * 0.56, size * 0.56)
+        p.drawEllipse(
+            round(size * 0.22), round(size * 0.22),
+            round(size * 0.56), round(size * 0.56),
+        )
         p.setPen(QPen(QColor("#ffffff"), 3))
-        p.drawLine(size * 0.5, size * 0.18, size * 0.5, size * 0.82)
-        p.drawLine(size * 0.18, size * 0.5, size * 0.82, size * 0.5)
+        p.drawLine(round(size * 0.5), round(size * 0.18), round(size * 0.5), round(size * 0.82))
+        p.drawLine(round(size * 0.18), round(size * 0.5), round(size * 0.82), round(size * 0.5))
         p.end()
         return QIcon(pm)
 
@@ -380,7 +414,8 @@ def main() -> None:
         sys.exit(1)
 
     app = JarvisApp()
-    _startup_greeting()
+    greeting = _startup_greeting()
+    app.overlay.status.setText(greeting)
     app.run()
 
 

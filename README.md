@@ -8,7 +8,8 @@ Works on **Linux** (tested on Ubuntu 24.04 GNOME Wayland) and **Windows**.
 
 ## What it looks like
 
-- **Browser UI** (`streamlit run ui.py`) — Claude.ai-style chat with warm dark palette, sidebar, typing indicator, voice input, file attach, screenshot display, tool timeline, and approval cards.
+- **Browser UI** (`uvicorn api.main:app`) — React app served by FastAPI with SSE streaming, sidebar, voice, approvals, tasks, memory, settings.
+- **Legacy Streamlit UI** (`streamlit run ui.py`) — still functional for parity and original UI.
 - **Desktop overlay** (`python jarvis_desktop.py`) — system tray app with global hotkey (`Ctrl+Alt+J`). Press it, speak into the mic, JARVIS answers out loud without you closing your current app.
 
 ## Quick start (one page)
@@ -28,12 +29,13 @@ pip install -r requirements.txt
 sudo apt install -y libportaudio2   # microphone / system speech
 
 # 5. Add your Groq API key to .env
-echo "GROQ_API_KEY=sk-your-key-here" > .env
+cp .env.example .env
+# edit .env and set GROQ_API_KEY=...
 
 # 6. Run the browser version
-streamlit run ui.py
+uvicorn api.main:app --host 127.0.0.1 --port 8000
 
-# 7. Open http://localhost:8501 in your browser
+# 7. Open http://localhost:8000 in your browser
 ```
 
 Then talk to JARVIS by typing or clicking the mic button.
@@ -42,23 +44,39 @@ Then talk to JARVIS by typing or clicking the mic button.
 
 ## Two ways to use JARVIS
 
-### A) Browser version — `streamlit run ui.py`
+### A) React web app — `uvicorn api.main:app`
 
-Best for documents, tasks, rules, briefing settings, and phone access. Use **Settings → Home location** to geocode your area; JARVIS rounds coordinates to 2 decimals and never logs the full value.
+Best for chat, approvals, tasks, memory, settings, activity, usage, documents.
+
+- Open `http://127.0.0.1:8000`
+- Type normally, or enable hands-free voice mode once with the mic button. In voice mode, speech is sent automatically, replies are spoken aloud, and “yes” / “no” answer approval prompts. Microphone permission is required; Chrome or Edge is recommended.
+- Toggle read replies aloud in chat/tools
+- Use pages in sidebar: Chat, Today, Tasks, Memory, Documents, Activity, Usage, Settings
+
+### B) Legacy Streamlit — `streamlit run ui.py`
+
+Older full-featured UI kept functional in `app_pages`.
 
 - Open `http://localhost:8501`
-- Type or click the 🎤 mic to speak
-- Toggle **"Read replies aloud"** in the chat sidebar to hear answers
-- Attach `.txt` / `.md` / `.pdf` files — they get indexed and you can ask about them
-- Use the Today page for tasks, rules, decisions, and morning briefing settings
+- Attach documents, configure location, habits, briefing
 
-### B) Desktop overlay — `python jarvis_desktop.py`
+### C) Desktop overlay — `python jarvis_desktop.py`
 
 Best for "don't interrupt my work" voice control.
 
-- A tray icon appears; press **`Ctrl+Alt+J`** (or click the icon)
-- An overlay pops up on top of your current window
-- Click the mic, speak, JARVIS answers out loud
+Install the optional desktop dependencies in the same virtual environment as the API:
+
+```powershell
+# Windows
+.venv\Scripts\python.exe -m pip install -r requirements-desktop.txt
+.venv\Scripts\python.exe jarvis_desktop.py
+```
+
+On Linux, install `libportaudio2` first; then run the equivalent `.venv/bin/python -m pip install -r requirements-desktop.txt` and start `jarvis_desktop.py`.
+
+- The tray icon and voice overlay appear when JARVIS starts
+- Press **`Ctrl+Alt+J`** (or click the tray icon) to bring the overlay back later
+- Click and hold the mic, speak, and JARVIS answers out loud
 - Overlay fades away — your app underneath stays untouched
 - Works on both Linux and Windows
 
@@ -155,6 +173,7 @@ Create a shortcut to `jarvis_desktop.py` in:
 | Component | Linux | Windows |
 |-----------|-------|---------|
 | Chat UI (Streamlit) | ✅ | ✅ |
+| React web app | ✅ | ✅ |
 | Desktop overlay (PyQt6) | ✅ | ✅ |
 | Volume control | `wpctl` | `pycaw` |
 | Brightness | sysfs / `brightnessctl` | `screen-brightness-control` |
@@ -186,6 +205,8 @@ Agnet_Example/
 ├── memory.py             # Memory, rules, decisions store
 ├── ui_theme.py           # Single stylesheet for all pages
 ├── jarvis/               # Packaged modules (agent, tasks, auth helpers)
+├── api/                  # FastAPI backend
+├── web/                  # React frontend
 ├── rag.py                # Document indexing + search
 ├── requirements.txt      # Python dependencies
 ├── .env                  # Your GROQ_API_KEY (create this)
@@ -225,7 +246,14 @@ For scaling / multi-user: `tasks`/`rules`/`decisions` tables already have a `use
 | Mic not working | Check OS sound settings → input device. Test with another app first. |
 | `Ctrl+Alt+J` does nothing | Wayland limitation — click the system tray icon instead. |
 | Screenshot fails | Linux: `sudo apt install gnome-screenshot`. Windows: `Pillow` is already in requirements. |
-| Port 8501 in use | `streamlit run ui.py --server.port 8502` |
+| Port 8000 in use | Use `--port 8001` or stop process |
+| Setup screen shows again | Wrong DB path or /tmp DB; check `JARVIS_DB` and resolved log |
+| Tool calling not supported | Use allowlisted model from settings |
+| 403/CSRF from dev server | Add dev origin to `JARVIS_ALLOWED_ORIGINS` |
+| Overpass 502/busy | Retry / provider backoff |
+| Groq daily limit | Resets per cap |
+| Missing libportaudio2 | `sudo apt install libportaudio2` |
+| Tailwind/PostCSS build error | `rm -rf node_modules && npm ci` |
 
 ---
 
@@ -236,6 +264,57 @@ For scaling / multi-user: `tasks`/`rules`/`decisions` tables already have a `use
 - **Auto-start** — already configured for Linux via `.config/autostart/`
 
 ---
+
+## Web frontend (React)
+
+Use Node.js **22.22.2 or newer** for the frontend build and test toolchain.
+
+```bash
+# terminal 1
+uvicorn api.main:app --host 127.0.0.1 --port 8000
+
+# terminal 2
+cd web
+npm ci
+npm run dev
+```
+
+Dev server port defaults to 5173. Use an alternate port if desired:
+```bash
+cd web && npm run dev -- --port 15173
+```
+
+Dev server runs on port 5173 (`http://127.0.0.1:5173`). For CORS during development, set in `.env`:
+
+```
+JARVIS_ALLOWED_ORIGINS=http://127.0.0.1:5173,http://localhost:5173
+```
+
+If using port 15173 instead:
+```
+JARVIS_ALLOWED_ORIGINS=http://127.0.0.1:15173,http://localhost:15173
+```
+
+By default only same-origin (`http://127.0.0.1:8000`) is allowed. Production runs on port 8000 with no extra configuration.
+
+## Testing
+
+```bash
+pytest -q
+cd web && npm test
+cd web && npx playwright test
+```
+
+Expected summaries:
+- API tests: `13 passed`
+- Frontend: `8 tests passed`
+- Playwright validates configured smoke/layout tests
+
+## Known limits
+
+- Wake word dependency installation can fail on Python versions incompatible with some audio/ML packages.
+- Not all desktop controls tested on every Linux flavor.
+- `.env` and `jarvis.db` are never committed.
 
 ## License
 

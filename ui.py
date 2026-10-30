@@ -2,12 +2,12 @@
 ui.py - entry point of the multi-page app.
 
     streamlit run ui.py
-
-Navigation only: it sets up the page config, the shared chrome-hiding CSS,
-and the sidebar navigation, then runs the selected page from app_pages/.
 """
 import os
+import re
+import sys
 from datetime import date, datetime, timedelta
+from pathlib import Path
 
 import streamlit as st
 from ui_theme import inject_theme
@@ -19,62 +19,61 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Shared theme (one injection)
 inject_theme()
 
 # Background reminder watcher
-from jarvis import app_briefing  # noqa: E402
 from jarvis import app_reminders  # noqa: E402
-from jarvis.app_briefing import get_setting, set_setting
 
 app_reminders.ensure_watcher()
 
 # --------------------------------------------------------------------------
-# Navigation pages (rendered in sidebar)
+# Navigation (st.navigation renders sidebar menu + runs page)
 # --------------------------------------------------------------------------
-
-NAV_PAGES = [
-    st.Page("app_pages/chat.py", title="Chat", icon=":material/chat:", default=True),
-    st.Page("app_pages/today.py", title="Today", icon=":material/calendar_today:"),
-    st.Page("app_pages/tasks.py", title="Tasks", icon=":material/checklist:"),
-    st.Page("app_pages/settings.py", title="Settings", icon=":material/settings:"),
-]
-NAV_DATA_PAGES = [
-    st.Page("app_pages/memory.py", title="Memory", icon=":material/psychology:"),
-    st.Page("app_pages/activity.py", title="Activity", icon=":material/receipt_long:"),
-    st.Page("app_pages/documents.py", title="Documents", icon=":material/description:"),
-    st.Page("app_pages/usage.py", title="Usage", icon=":material/insights:"),
-]
 
 nav = st.navigation(
     {
-        "": NAV_PAGES,
-        "Your data": NAV_DATA_PAGES,
+        "": [
+            st.Page("app_pages/chat.py", title="Chat", icon=":material/chat:", default=True),
+            st.Page("app_pages/today.py", title="Today", icon=":material/calendar_today:"),
+            st.Page("app_pages/tasks.py", title="Tasks", icon=":material/checklist:"),
+            st.Page("app_pages/settings.py", title="Settings", icon=":material/settings:"),
+        ],
+        "Your data": [
+            st.Page("app_pages/memory.py", title="Memory", icon=":material/psychology:"),
+            st.Page("app_pages/activity.py", title="Activity", icon=":material/receipt_long:"),
+            st.Page("app_pages/documents.py", title="Documents", icon=":material/description:"),
+            st.Page("app_pages/usage.py", title="Usage", icon=":material/insights:"),
+        ],
     },
     position="sidebar",
 )
 
 # --------------------------------------------------------------------------
-# sidebar helpers
+# sidebar helpers (conversation data lives in jarvis.conversations)
 # --------------------------------------------------------------------------
 
-import sys
-from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 try:
-    from app_pages.chat import recent_conversations, search_conversations
-    from jarvis.tasks import latest_usage
-    from jarvis import agent
-except Exception:
+    from jarvis.conversations import recent_conversations, search_conversations  # noqa: E402
+    from jarvis.tasks import latest_usage  # noqa: E402
+    from jarvis import agent  # noqa: E402
+    from jarvis.app_briefing import get_setting, set_setting  # noqa: E402
+except Exception as exc:  # log and show a small sidebar warning, never crash
+    import logging  # noqa: PLC0415
+
+    logging.getLogger("jarvis.ui").warning("sidebar imports failed: %s", exc)
     recent_conversations = None
     search_conversations = None
     latest_usage = None
     agent = None
 
 
+_THREAD_RE = re.compile(r"^ui-(\d{8})-(\d{6})$")
+
+
 def _render_recents(tid: str) -> None:
-    """Render recents grouped Today / Yesterday / Earlier."""
+    """Render recents grouped Today / Yesterday / Earlier via regex on thread id."""
     if not recent_conversations:
         return
     recents = recent_conversations()
@@ -84,11 +83,12 @@ def _render_recents(tid: str) -> None:
     yesterday = today - timedelta(days=1)
     today_r, yesterday_r, earlier_r = [], [], []
     for thread_id, title in recents:
-        try:
-            dt_str = thread_id.split("-")[1] if "-" in thread_id else ""
-            dt = datetime.strptime(dt_str, "%Y%m%d-%H%M%S").date()
-        except Exception:
-            dt = today - timedelta(days=999)
+        m = _THREAD_RE.match(thread_id)
+        if not m:
+            earlier_r.append((thread_id, title))
+            continue
+        y, mo, d = int(m.group(1)[:4]), int(m.group(1)[4:6]), int(m.group(1)[6:8])
+        dt = date(y, mo, d)
         if dt == today:
             today_r.append((thread_id, title))
         elif dt == yesterday:
@@ -113,23 +113,37 @@ def _render_recents(tid: str) -> None:
     _group("Earlier", earlier_r)
 
 
+@st.cache_data(ttl=10)
+def _today_token_usage() -> int:
+    """Sum of prompt + completion tokens used today, from one SQL query."""
+    if latest_usage is None:
+        return 0
+    try:
+        rows = latest_usage(limit=10000)
+    except Exception:
+        return 0
+    today_prefix = date.today().isoformat()
+    return sum(
+        (r.get("prompt_tokens") or 0) + (r.get("completion_tokens") or 0)
+        for r in rows
+        if str(r.get("ts", "")).startswith(today_prefix)
+    )
+
+
 # --------------------------------------------------------------------------
-# sidebar chrome (renders after nav groups)
+# sidebar chrome
 # --------------------------------------------------------------------------
 
 with st.sidebar:
-    # Brand at top of sidebar chrome
     st.markdown('<div class="side-brand"><span class="spark">✳</span> JARVIS</div>',
                 unsafe_allow_html=True)
 
-    # New chat
-    if st.button("+ New chat", icon=":material/add:", width="stretch", key="new_chat"):
+    if st.button("New chat", icon=":material/add:", width="stretch", key="new_chat"):
         st.query_params["t"] = f"ui-{datetime.now():%Y%m%d-%H%M%S}"
         st.session_state.messages = []
         st.session_state.pending = None
         st.rerun()
 
-    # Search chats
     st.markdown('<div class="side-label">Search chats</div>', unsafe_allow_html=True)
     sq = st.text_input("Search conversations", label_visibility="collapsed",
                        placeholder="Search conversations…", key="chat_search_q")
@@ -145,28 +159,16 @@ with st.sidebar:
         else:
             st.caption("No matches.")
 
-    # Recents grouped Today / Yesterday / Earlier
     _render_recents(st.query_params.get("t", "ui-main"))
 
     st.divider()
 
-    # Quota bar
     st.markdown('<div class="side-label">Today · Quota</div>', unsafe_allow_html=True)
-    _today_prefix = datetime.now().strftime("%Y-%m-%d")
-    _qused = 0
-    if latest_usage:
-        try:
-            _qrows = latest_usage(limit=10000)
-            _qrows_today = [r for r in _qrows if str(r.get("ts", "")).startswith(_today_prefix)]
-            _qused = sum((r.get("prompt_tokens") or 0) + (r.get("completion_tokens") or 0)
-                          for r in _qrows_today)
-        except Exception:
-            _qused = 0
+    _qused = _today_token_usage()
     _qlimit = int(os.getenv("GROQ_DAILY_TOKEN_CAP", "200000"))
     qtxt = "%dk / %dk tokens" % (round(_qused / 1000), round(_qlimit / 1000))
     st.progress(min(1.0, _qused / _qlimit or .001), text=qtxt)
 
-    # Friendly model name
     _MODEL_LABELS = {
         "groq:openai/gpt-oss-120b": "JARVIS 120B",
         "groq:openai/gpt-oss-20b": "JARVIS 20B",
@@ -174,7 +176,6 @@ with st.sidebar:
     _model_name = agent.MODEL_NAME if agent else "groq:openai/gpt-oss-20b"
     st.caption(_MODEL_LABELS.get(_model_name, _model_name.split("/")[-1].replace("-", " ").title()))
 
-    # Voice toggle
     if "voice_replies" not in st.session_state:
         st.session_state.voice_replies = get_setting("voice_replies", "0") == "1"
 
@@ -184,7 +185,6 @@ with st.sidebar:
     st.toggle("Read replies aloud", key="voice_replies", on_change=_save_voice,
               help="Speaks every new answer with a neural voice")
 
-    # Stop button: only while speech is playing
     if st.session_state.get("voice_play_pending") or st.session_state.get("voice_playing"):
         if st.button("Stop", key="voice_stop", width="stretch",
                      icon=":material/stop:", help="Cut the currently playing answer."):
@@ -199,37 +199,11 @@ with st.sidebar:
 
 
 # --------------------------------------------------------------------------
-# reminders / briefing fragments
+# reminders fragment
 # --------------------------------------------------------------------------
 
 @st.fragment(run_every=15)
-def briefing_watch() -> None:
-    """Proactive half: ... (skip on Chat home, handled by app_pages/chat.py)"""
-    if (st.query_params.get("t", "").startswith("ui-")
-            and not (st.session_state.get("messages") or [])):
-        return
-    text = app_briefing.today_text()
-    if text is None and app_briefing.due():
-        with st.status("\U0001F305 Writing your morning briefing...") as brief:
-            text = app_briefing.generate()
-            brief.update(label="\U0001F305 Morning briefing ready", state="complete")
-    if text and not st.session_state.get("briefing_hidden"):
-        with st.container(border=True):
-            h1, h2, h3 = st.columns([9, 1, 1], vertical_alignment="center")
-            h1.markdown("**\U0001F305 Morning briefing**")
-            if h2.button("\u21bb", key="briefing_regen",
-                         help="Write it again (e.g. after a rate limit)"):
-                app_briefing.clear_today()
-                st.rerun()
-            if h3.button("\u2715", key="briefing_hide", help="Hide for today"):
-                st.session_state.briefing_hidden = True
-                st.rerun()
-            st.markdown(text)
-
-
-@st.fragment(run_every=15)
 def reminder_watch() -> None:
-    """In-app half: toast + banner for newly-due tasks."""
     due = app_reminders.due_now()
     seen = st.session_state.setdefault("reminders_seen", set())
     for r in due:
@@ -262,4 +236,5 @@ def reminder_watch() -> None:
 
 
 reminder_watch()
-briefing_watch()
+
+nav.run()
