@@ -63,6 +63,9 @@ client = None
 def _setup():
     global client
     _clean_tables()
+    original_ask_agent = agent_mod.ask_agent
+    original_ask_agent_stream = agent_mod.ask_agent_stream
+    original_fake_mode = getattr(agent_mod, "_fake_mode", None)
     agent_mod.ask_agent = lambda *a, **k: {"reply": "ok", "tools": [], "error": None, "pending": None}
     agent_mod._fake_mode = "ok"
 
@@ -89,6 +92,12 @@ def _setup():
     client = TestClient(app)
     yield
     _clean_tables()
+    agent_mod.ask_agent = original_ask_agent
+    agent_mod.ask_agent_stream = original_ask_agent_stream
+    if original_fake_mode is None:
+        delattr(agent_mod, "_fake_mode")
+    else:
+        agent_mod._fake_mode = original_fake_mode
 
 
 # ---------- 401 without session ----------
@@ -347,6 +356,34 @@ def test_conversation_history_and_custom_title():
     listing = client.get("/api/conversations?limit=100")
     titles = [c["title"] for group in listing.json().values() for c in group]
     assert "Weekend meal ideas" in titles, titles
+
+
+def test_delete_conversation_removes_history_and_title():
+    from jarvis.conversations import _ensure_title_table
+
+    csrf = _login_owner_and_csrf()
+    thread_id = "ui-delete-regression"
+    _ensure_title_table()
+    conn = sqlite3.connect(str(tasks_mod.DB_PATH))
+    conn.execute(
+        "INSERT INTO conversation_log(thread_id,user_id,text,ts) VALUES(?,?,?,?)",
+        (thread_id, 1, "User: delete me", "2026-10-30T00:00:00"),
+    )
+    conn.execute(
+        "INSERT INTO conversation_titles(thread_id,title,updated_at) VALUES(?,?,?)",
+        (thread_id, "Delete regression", "2026-10-30T00:00:00"),
+    )
+    conn.commit()
+    conn.close()
+
+    response = client.delete(
+        f"/api/conversations/{thread_id}", headers={"X-CSRF-Token": csrf}
+    )
+    assert response.status_code == 200, response.text
+    conn = sqlite3.connect(str(tasks_mod.DB_PATH))
+    assert conn.execute("SELECT 1 FROM conversation_log WHERE thread_id=?", (thread_id,)).fetchone() is None
+    assert conn.execute("SELECT 1 FROM conversation_titles WHERE thread_id=?", (thread_id,)).fetchone() is None
+    conn.close()
 
 
 # ---------- real db unchanged ----------

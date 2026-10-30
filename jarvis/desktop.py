@@ -467,7 +467,8 @@ def system_status() -> str:
     return "\n".join(lines)
 
 
-# common app-name synonyms -> the real binary or a web URL
+# Common local app-name synonyms -> executable name. Websites are only opened
+# when the user explicitly supplies a URL.
 _APP_ALIASES = {
     "chrome": "google-chrome",
     "google chrome": "google-chrome",
@@ -475,27 +476,73 @@ _APP_ALIASES = {
     "vscode": "code",
     "vs code": "code",
     "visual studio code": "code",
-    "whatsapp": "https://web.whatsapp.com",
-    "whatsapp web": "https://web.whatsapp.com",
-    "wa": "https://web.whatsapp.com",
-    "telegram": "https://web.telegram.org",
-    "yt": "https://youtube.com",
-    "youtube": "https://youtube.com",
-    "gmail": "https://mail.google.com",
-    "google": "https://google.com",
-    "reddit": "https://reddit.com",
-    "twitter": "https://x.com",
-    "x": "https://x.com",
-    "facebook": "https://facebook.com",
-    "fb": "https://facebook.com",
-    "docs": "https://docs.google.com",
-    "gdrive": "https://drive.google.com",
-    "drive": "https://drive.google.com",
-    "calendar": "https://calendar.google.com",
-    "maps": "https://maps.google.com",
-    "notion": "https://notion.so",
-    "spotify": "https://open.spotify.com",
+    "calculator": "calculator",
 }
+
+
+def _windows_start_menu_shortcut(target: str):
+    """Find an installed app by its Start Menu shortcut display name."""
+    key = re.sub(r"[^a-z0-9]", "", target.lower())
+    if not key:
+        return None
+    roots = (
+        Path(os.environ.get("APPDATA", str(Path.home() / "AppData/Roaming")))
+        / "Microsoft/Windows/Start Menu/Programs",
+        Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData"))
+        / "Microsoft/Windows/Start Menu/Programs",
+    )
+    for root in roots:
+        if not root.is_dir():
+            continue
+        try:
+            for shortcut in root.rglob("*.lnk"):
+                if re.sub(r"[^a-z0-9]", "", shortcut.stem.lower()) == key:
+                    return [str(shortcut)]
+        except OSError:
+            continue
+    return None
+
+
+def _windows_app_command(target: str):
+    """Resolve common Windows app names to launchable executables/entries."""
+    low = target.strip().lower()
+    roots = [
+        Path(os.environ.get("ProgramFiles", r"C:\Program Files")),
+        Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")),
+        Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData/Local"))),
+    ]
+    known = {
+        "chrome": ("chrome.exe", [root / "Google/Chrome/Application/chrome.exe" for root in roots]),
+        "google chrome": ("chrome.exe", [root / "Google/Chrome/Application/chrome.exe" for root in roots]),
+        "google-chrome": ("chrome.exe", [root / "Google/Chrome/Application/chrome.exe" for root in roots]),
+        "edge": ("msedge.exe", [root / "Microsoft/Edge/Application/msedge.exe" for root in roots]),
+        "microsoft-edge": ("msedge.exe", [root / "Microsoft/Edge/Application/msedge.exe" for root in roots]),
+        "vs code": ("code", [roots[2] / "Programs/Microsoft VS Code/Code.exe",
+                              roots[0] / "Microsoft VS Code/Code.exe"]),
+        "vscode": ("code", [roots[2] / "Programs/Microsoft VS Code/Code.exe",
+                             roots[0] / "Microsoft VS Code/Code.exe"]),
+        "visual studio code": ("code", [roots[2] / "Programs/Microsoft VS Code/Code.exe",
+                                         roots[0] / "Microsoft VS Code/Code.exe"]),
+        "code": ("code", [roots[2] / "Programs/Microsoft VS Code/Code.exe",
+                           roots[0] / "Microsoft VS Code/Code.exe"]),
+        "calculator": ("calc.exe", []),
+        "calc": ("calc.exe", []),
+    }
+    item = known.get(low)
+    if item:
+        command, candidates = item
+        found = shutil.which(command)
+        if found:
+            return [found]
+        for candidate in candidates:
+            if candidate.is_file():
+                return [str(candidate)]
+        # Windows resolves system app execution aliases such as calc.exe.
+        if low in {"calculator", "calc"}:
+            return ["calc.exe"]
+        return _windows_start_menu_shortcut(target)
+    found = shutil.which(target)
+    return [found] if found else _windows_start_menu_shortcut(target)
 
 
 @tool
@@ -505,11 +552,35 @@ def open_app(app: str) -> str:
     passing a path or link ('~/Documents', '/home/u/report.pdf',
     'https://example.com'). Instant, no approval needed."""
     target = app.strip()
-    # common-name / web-app alias resolution (e.g. "chrome" -> "google-chrome",
-    # "whatsapp" -> https://web.whatsapp.com)
-    _alias = _APP_ALIASES.get(target.lower().strip())
+    # Resolve local application synonyms. Websites require an explicit URL.
+    _alias = get_aliases().get(target.lower().strip())
     if _alias:
         target = _alias
+
+    # Spotify track URIs hand the track to the installed desktop client,
+    # unlike open.spotify.com URLs which only navigate a browser.
+    spotify_track = re.fullmatch(r"spotify:track:([A-Za-z0-9]+)", target, re.I)
+    if spotify_track:
+        if IS_WINDOWS:
+            if not _windows_app_command("spotify"):
+                return ("Spotify desktop app is not installed or has no Start Menu "
+                        "shortcut; I did not open the web player.")
+            try:
+                os.startfile(target)
+                return "Sent the track to the Spotify desktop app."
+            except Exception as e:
+                return f"Could not open the track in Spotify desktop: {e}"
+        if IS_LINUX:
+            spotify = shutil.which("spotify")
+            if spotify:
+                return _launch([spotify, target], "Spotify")
+            found = _find_desktop("spotify")
+            if found:
+                _name, argv = found
+                return _launch(argv + [target], "Spotify")
+            return "Spotify desktop app is not installed; I did not open the web player."
+        return "Spotify track playback is supported on Windows and Linux only."
+
     urlish = bool(re.match(r"^[a-z][a-z0-9+.-]*://", target, re.I))
     pathish = target.startswith(("/", "~", "./")) or target.startswith("$HOME")
     if IS_WINDOWS:
@@ -531,6 +602,13 @@ def open_app(app: str) -> str:
             return f"Opened {target}."
         err = (r.stderr if r is not None else "xdg-open not installed").strip()[:200]
         return f"xdg-open failed: {err}"
+
+    if IS_WINDOWS:
+        command = _windows_app_command(target)
+        if command:
+            return _launch(command, target)
+        return (f"Could not find '{app}' on this PC. Check that it is installed; "
+                "for Chrome/VS Code, try reinstalling or adding it to PATH.")
 
     exe = shutil.which(target)
     if exe:
@@ -557,9 +635,9 @@ def open_app(app: str) -> str:
     if candidates:
         return ("'" + target + "' was not found, but close matches exist: "
                 + ", ".join(list(dict.fromkeys(candidates))[:5]) + ". Try one of those names.")
-    return ("'" + target + "' was not found on PATH and has no launcher. "
-            "Try the web equivalent (e.g. 'whatsapp' opens web.whatsapp.com), "
-            "or run_command if it needs installing.")
+    return (f"Could not find an installed application named '{app}'. "
+            "If you meant a website, provide its URL; otherwise check that the "
+            "app is installed on this computer.")
 
 @tool
 def close_app(app: str) -> str:

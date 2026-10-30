@@ -130,8 +130,9 @@ export function SettingsPage() {
         <p className="muted small">Add keys in `.env` then restart the backend.</p>
       </section>
       <section className="card">
-        <h3>Fast-path alias whitelist</h3>
-        <textarea className="input" rows={8} value={aliases} onChange={(e) => setAliases(e.target.value)} placeholder="chrome -> google-chrome" />
+        <h3>Local app alias whitelist</h3>
+        <p className="muted small">Map a spoken alias to an installed app name. Use a URL only when you explicitly want that alias to open a website.</p>
+        <textarea className="input" rows={8} value={aliases} onChange={(e) => setAliases(e.target.value)} placeholder="browser -> chrome.exe" />
         <button className="btn-primary" onClick={save}>Save aliases</button>
       </section>
       <section className="card">

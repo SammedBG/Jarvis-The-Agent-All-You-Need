@@ -23,6 +23,8 @@ export function ChatShell({ threadId }: { threadId: string }) {
   const [tools, setTools] = useState<ToolStep[]>([])
   const [approval, setApproval] = useState<any | null>(null)
   const [streaming, setStreaming] = useState(false)
+  const [voiceMode, setVoiceMode] = useState(false)
+  const [voiceSpeaking, setVoiceSpeaking] = useState(false)
   const [errorCard, setErrorCard] = useState<string | null>(null)
   const [usageLine, setUsageLine] = useState<string | null>(null)
   const [needLocCard, setNeedLocCard] = useState(false)
@@ -30,6 +32,9 @@ export function ChatShell({ threadId }: { threadId: string }) {
   const [locLink, setLocLink] = useState('')
   const lastUserRef = useRef<string>('')
   const [locBusy, setLocBusy] = useState(false)
+  const voiceModeRef = useRef(false)
+  const approvalRef = useRef<any | null>(null)
+  approvalRef.current = approval
   const scrollRef = useRef<HTMLDivElement>(null)
   const autoScroll = useRef(true)
 
@@ -64,6 +69,28 @@ export function ChatShell({ threadId }: { threadId: string }) {
       if (idx >= 0 && next[idx].role === 'assistant') next[idx] = updater(next[idx])
       return next
     })
+  }, [])
+
+  const changeVoiceMode = useCallback((enabled: boolean) => {
+    voiceModeRef.current = enabled
+    setVoiceMode(enabled)
+    if (!enabled) {
+      window.speechSynthesis?.cancel()
+      setVoiceSpeaking(false)
+    }
+  }, [])
+
+  const speakReply = useCallback((reply: string) => {
+    if (!voiceModeRef.current || !reply.trim() || !('speechSynthesis' in window)) {
+      setVoiceSpeaking(false)
+      return
+    }
+    window.speechSynthesis.cancel()
+    const utterance = new SpeechSynthesisUtterance(reply.replace(/```[\s\S]*?```/g, 'Code block omitted.'))
+    utterance.onend = () => setVoiceSpeaking(false)
+    utterance.onerror = () => setVoiceSpeaking(false)
+    setVoiceSpeaking(true)
+    window.speechSynthesis.speak(utterance)
   }, [])
 
   const send = useCallback(async (text: string) => {
@@ -115,13 +142,14 @@ export function ChatShell({ threadId }: { threadId: string }) {
       setErrorCard(e?.message || 'Something went wrong.')
     } finally {
       flush(true)
+      speakReply(accumulated)
       setStreaming(false)
       ;(window as any).__chat_abort = null
       window.dispatchEvent(new Event('jarvis:conversation-updated'))
       const needsLoc = /which area and city/i.test(accumulated) || /no location saved/i.test(accumulated)
       if (needsLoc) setNeedLocCard(true)
     }
-  }, [threadId, streaming, appendMessage, updateLastAssistant])
+  }, [threadId, streaming, appendMessage, updateLastAssistant, speakReply])
 
   const stop = useCallback(() => {
     void api.POST('/api/chat/stop', { thread_id: threadId }).catch(() => {})
@@ -143,6 +171,22 @@ export function ChatShell({ threadId }: { threadId: string }) {
       setApproval(null)
     }
   }, [approval, threadId])
+
+  const sendVoice = useCallback((text: string) => {
+    const pending = approvalRef.current
+    if (pending) {
+      const answer = text.trim().toLowerCase().replace(/[,.!?]+/g, ' ').replace(/\s+/g, ' ').trim()
+      if (/^(yes|yeah|yep|sure|approve|approved|confirm|go ahead|do it)( please)?( go ahead| do it)?$/.test(answer)) {
+        void approve(true)
+        return
+      }
+      if (/^(no|nope|decline|cancel|don't|do not)( please)?( cancel| don't| do not)?$/.test(answer)) {
+        void approve(false)
+        return
+      }
+    }
+    void send(text)
+  }, [approve, send])
 
   // auto scroll
   useEffect(() => {
@@ -277,7 +321,15 @@ export function ChatShell({ threadId }: { threadId: string }) {
           </div>
         </div>
       )}
-      <Composer onSend={send} streaming={streaming} onStop={stop} />
+      <Composer
+        onSend={send}
+        onVoiceSend={sendVoice}
+        streaming={streaming}
+        onStop={stop}
+        voiceMode={voiceMode}
+        voicePaused={streaming || voiceSpeaking}
+        onVoiceModeChange={changeVoiceMode}
+      />
     </div>
   )
 }

@@ -70,7 +70,7 @@ def _conversation_title(thread_id: str, checkpoint_id: str) -> str:
     if not row:
         return ""
     transcript = str(row[0] or "")
-    first = re.search(r"(?:^|\n)User:\s*(.*?)(?=\nJARVIS:|$)", transcript, re.S | re.I)
+    first = re.search(r"(?:^|\n)User:\s*(.*?)(?=\s+JARVIS:|$)", transcript, re.S | re.I)
     text = (first.group(1) if first else transcript).strip()
     words = text.split()
     title = " ".join(words[:7])

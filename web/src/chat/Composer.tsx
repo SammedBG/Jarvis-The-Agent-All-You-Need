@@ -1,27 +1,31 @@
 import { useEffect, useRef, useState } from 'react'
 import { getCsrfToken } from '../lib/api'
-import { FileUp, Mic, Send, Square, X } from 'lucide-react'
+import { FileUp, Mic, MicOff, Send, Square, X } from 'lucide-react'
 
 interface Props {
   onSend: (text: string) => void
+  onVoiceSend: (text: string) => void
   streaming: boolean
   onStop: () => void
+  voiceMode: boolean
+  voicePaused: boolean
+  onVoiceModeChange: (enabled: boolean) => void
 }
 
-export function Composer({ onSend, streaming, onStop }: Props) {
+export function Composer({ onSend, onVoiceSend, streaming, onStop, voiceMode, voicePaused, onVoiceModeChange }: Props) {
   const [text, setText] = useState('')
   const [attach, setAttach] = useState<File | null>(null)
-  const [record, setRecord] = useState(false)
-  const [elapsed, setElapsed] = useState(0)
   const [busy, setBusy] = useState(false)
-  const [processingVoice, setProcessingVoice] = useState(false)
   const [voiceError, setVoiceError] = useState('')
+  const [voiceListening, setVoiceListening] = useState(false)
+  const [voiceTranscript, setVoiceTranscript] = useState('')
   const ta = useRef<HTMLTextAreaElement>(null)
   const fileInput = useRef<HTMLInputElement>(null)
-  const mediaRef = useRef<MediaRecorder | null>(null)
-  const cancelRef = useRef(false)
-  const chunks = useRef<Blob[]>([])
-  const timerRef = useRef<number | null>(null)
+  const onVoiceSendRef = useRef(onVoiceSend)
+  const pausedRef = useRef(voicePaused)
+
+  useEffect(() => { onVoiceSendRef.current = onVoiceSend }, [onVoiceSend])
+  useEffect(() => { pausedRef.current = voicePaused }, [voicePaused])
 
   // auto-grow
   useEffect(() => {
@@ -42,7 +46,7 @@ export function Composer({ onSend, streaming, onStop }: Props) {
   }
 
   async function onSendClick() {
-    if (streaming || busy || record) return
+    if (streaming || busy) return
     let msg = text.trim()
     if (attach) {
       setBusy(true)
@@ -71,92 +75,97 @@ export function Composer({ onSend, streaming, onStop }: Props) {
     setAttach(null)
   }
 
-  async function startRecording() {
+  async function toggleVoiceMode() {
     setVoiceError('')
-    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
-      setVoiceError('Voice recording is not supported by this browser.')
+    if (voiceMode) {
+      onVoiceModeChange(false)
+      return
+    }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setVoiceError('Microphone access requires a secure browser context such as localhost or HTTPS.')
       return
     }
     try {
+      // Request permission directly from the click gesture. It is then retained
+      // while hands-free recognition runs, without another click per turn.
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const mr = new MediaRecorder(stream)
-      cancelRef.current = false
-      setElapsed(0)
-      chunks.current = []
-      mr.ondataavailable = (ev) => { if (ev.data.size > 0) chunks.current.push(ev.data) }
-      mr.onstop = async () => {
-        stream.getTracks().forEach((track) => track.stop())
-        mediaRef.current = null
-        if (timerRef.current != null) { window.clearInterval(timerRef.current); timerRef.current = null }
-        setRecord(false)
-        if (cancelRef.current) {
-          chunks.current = []
-          setBusy(false)
-          setProcessingVoice(false)
-          return
-        }
-        const blob = new Blob(chunks.current, { type: mr.mimeType || 'audio/webm' })
-        chunks.current = []
-        if (!blob.size) {
-          setVoiceError('No audio was recorded. Try again.')
-          setBusy(false)
-          setProcessingVoice(false)
-          return
-        }
-        setBusy(true)
-        setProcessingVoice(true)
-        try {
-          const form = new FormData()
-          form.append('file', blob, 'audio.webm')
-          const csrf = getCsrfToken()
-          const res = await fetch('/api/transcribe', {
-            method: 'POST', credentials: 'include',
-            headers: csrf ? { 'X-CSRF-Token': csrf } : {}, body: form,
-          })
-          const result = await res.json().catch(() => ({}))
-          if (!res.ok) throw new Error(result.detail || `Transcription failed (${res.status})`)
-          if (!result.text) throw new Error('No speech was detected. Try recording again.')
-          setText((prev) => (prev ? `${prev} ${result.text}` : result.text))
-        } catch (error: any) {
-          setVoiceError(error?.message || 'Voice transcription failed.')
-        } finally {
-          setBusy(false)
-          setProcessingVoice(false)
-        }
-      }
-      mediaRef.current = mr
-      mr.start()
-      setRecord(true)
-      timerRef.current = window.setInterval(() => setElapsed((n) => n + 1), 1000)
+      stream.getTracks().forEach((track) => track.stop())
+      onVoiceModeChange(true)
     } catch {
-      setVoiceError('Microphone permission was denied or no microphone is available.')
+      setVoiceError('Microphone permission was denied. Allow microphone access, then enable voice mode again.')
     }
   }
 
-  function finishRecording() {
-    if (mediaRef.current?.state === 'recording') {
-      setBusy(true)
-      setProcessingVoice(true)
-      mediaRef.current.stop()
+  useEffect(() => {
+    if (!voiceMode) {
+      setVoiceListening(false)
+      setVoiceTranscript('')
+      return
     }
-  }
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      setVoiceError('Hands-free voice requires Chrome or Edge. Voice mode was turned off.')
+      onVoiceModeChange(false)
+      return
+    }
 
-  function cancelRecording() {
-    cancelRef.current = true
-    try { mediaRef.current?.stop() } catch { /* recorder already stopped */ }
-    if (!mediaRef.current) setRecord(false)
-    chunks.current = []
-    if (timerRef.current != null) { window.clearInterval(timerRef.current); timerRef.current = null }
-    setRecord(false)
-    setBusy(false)
-    setProcessingVoice(false)
-  }
-
-  useEffect(() => () => {
-    cancelRef.current = true
-    try { mediaRef.current?.stop() } catch { /* recorder already stopped */ }
-    if (timerRef.current != null) window.clearInterval(timerRef.current)
-  }, [])
+    let live = true
+    let restartTimer: number | undefined
+    let sendTimer: number | undefined
+    let pendingText = ''
+    let recognition: any
+    const start = () => {
+      if (!live || pausedRef.current || !recognition) return
+      try { recognition.start() } catch { /* already starting/listening */ }
+    }
+    recognition = new SpeechRecognition()
+    recognition.continuous = true
+    recognition.interimResults = true
+    recognition.lang = navigator.language || 'en-US'
+    recognition.onstart = () => { if (live) setVoiceListening(true) }
+    recognition.onresult = (event: any) => {
+      let interim = ''
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const result = event.results[index]
+        const phrase = result[0]?.transcript?.trim()
+        if (!phrase) continue
+        if (result.isFinal) pendingText = `${pendingText} ${phrase}`.trim()
+        else interim = `${interim} ${phrase}`.trim()
+      }
+      setVoiceTranscript([pendingText, interim].filter(Boolean).join(' '))
+      if (pendingText) {
+        if (sendTimer) window.clearTimeout(sendTimer)
+        sendTimer = window.setTimeout(() => {
+          const message = pendingText.trim()
+          pendingText = ''
+          setVoiceTranscript('')
+          if (message && live && !pausedRef.current) onVoiceSendRef.current(message)
+        }, 900)
+      }
+    }
+    recognition.onerror = (event: any) => {
+      if (!live || event.error === 'no-speech' || event.error === 'aborted') return
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+        setVoiceError('Microphone permission is blocked. Allow microphone access in your browser, then enable voice mode again.')
+        onVoiceModeChange(false)
+      } else {
+        setVoiceError(`Voice recognition error: ${event.error || 'unknown error'}`)
+      }
+    }
+    recognition.onend = () => {
+      if (!live) return
+      setVoiceListening(false)
+      if (!pausedRef.current) restartTimer = window.setTimeout(start, 300)
+    }
+    start()
+    return () => {
+      live = false
+      if (restartTimer) window.clearTimeout(restartTimer)
+      if (sendTimer) window.clearTimeout(sendTimer)
+      try { recognition.stop() } catch { /* already stopped */ }
+      setVoiceListening(false)
+    }
+  }, [voiceMode, voicePaused, onVoiceModeChange])
 
   return (
     <div className="composer" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 12px)' }}>
@@ -165,43 +174,44 @@ export function Composer({ onSend, streaming, onStop }: Props) {
           <FileUp size={18} strokeWidth={1.8} />
         </button>
         <input ref={fileInput} className="composer-file-input" type="file" accept=".txt,.md,.pdf" onChange={(event) => { setAttach(event.target.files?.[0] ?? null); event.currentTarget.value = ''; setVoiceError('') }} />
-        {record ? (
+        {voiceMode ? (
           <div className="voice-capture" role="status" aria-live="polite">
-            <button className="voice-cancel" onClick={cancelRecording} aria-label="Cancel recording" title="Discard recording"><X size={18} /></button>
             <div className="voice-live">
-              <span className="voice-live-label"><span className="recording-dot" />Listening</span>
+              <span className="voice-live-label"><span className="recording-dot" />{voicePaused ? 'JARVIS responding' : voiceListening ? 'Listening' : 'Starting microphone'}</span>
               <span className="voice-wave" aria-hidden="true">{Array.from({ length: 24 }, (_, index) => <i key={index} />)}</span>
-              <span className="voice-time">{String(Math.floor(elapsed / 60)).padStart(2, '0')}:{String(elapsed % 60).padStart(2, '0')}</span>
+              <span className="voice-transcript">{voiceTranscript || 'Speak naturally; JARVIS will reply aloud.'}</span>
             </div>
-            <button className="voice-finish" onClick={finishRecording} aria-label="Finish voice input" title="Finish and transcribe" disabled={busy}><Square size={15} fill="currentColor" /></button>
           </div>
         ) : (
           <textarea
             ref={ta}
             className="composer-textarea"
             rows={1}
-            placeholder={processingVoice ? 'Transcribing your voice…' : 'Message JARVIS…'}
+            placeholder="Message JARVIS…"
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={onKeyDown}
             disabled={streaming || busy}
           />
         )}
-        {!record && (
-          <button className="icon-btn" aria-label="Dictate a message" title="Dictate a message" onClick={startRecording} disabled={streaming || busy}>
-            <Mic size={18} strokeWidth={1.8} />
-          </button>
-        )}
-        {record ? null : streaming ? (
+        <button
+          className={`icon-btn voice-mode-toggle${voiceMode ? ' active' : ''}`}
+          aria-label={voiceMode ? 'Turn off hands-free voice mode' : 'Turn on hands-free voice mode'}
+          title={voiceMode ? 'Turn off hands-free voice mode' : 'Turn on hands-free voice mode'}
+          onClick={() => { void toggleVoiceMode() }}
+        >
+          {voiceMode ? <MicOff size={18} strokeWidth={1.8} /> : <Mic size={18} strokeWidth={1.8} />}
+        </button>
+        {streaming && !voiceMode ? (
           <button className="icon-btn" aria-label="Stop response" onClick={onStop}><Square size={17} /></button>
-        ) : (
-          <button className="icon-btn send-btn" aria-label="Send" title="Send message" onClick={onSendClick} disabled={busy || record || (!text.trim() && !attach)}>
+        ) : !voiceMode && (
+          streaming ? null : <button className="icon-btn send-btn" aria-label="Send" title="Send message" onClick={onSendClick} disabled={busy || (!text.trim() && !attach)}>
             <Send size={18} />
           </button>
         )}
       </div>
       {attach && <div className="attach-chip"><FileUp size={14} /> <span>{attach.name}</span><button onClick={() => setAttach(null)} aria-label="Remove attachment"><X size={14} /></button></div>}
-      {busy && !processingVoice && attach && <div className="composer-status">Reading document…</div>}
+      {busy && attach && <div className="composer-status">Reading document…</div>}
       {voiceError && <div className="composer-status composer-error" role="status">{voiceError}</div>}
     </div>
   )

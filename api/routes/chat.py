@@ -180,6 +180,8 @@ async def chat(payload: ChatPayload, request: Request, user: dict = Depends(requ
                             msg = "Could not reach the model provider. Check the network and retry."
                         elif any(term in detail for term in ("model", "not found", "unsupported")):
                             msg = "The configured model is unavailable. Check the model setting and provider access."
+                        elif "tool call validation failed" in detail or "not in request.tools" in detail:
+                            msg = "I couldn't run the requested action because its tool wasn't enabled for this turn. Retry the request; follow-up tool routing has been fixed."
                         else:
                             msg = "The assistant could not complete this request. Check API Activity for details, then retry."
                         # log details to Activity; never return raw error to client

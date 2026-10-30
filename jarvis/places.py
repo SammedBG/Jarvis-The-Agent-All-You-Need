@@ -481,7 +481,9 @@ def _osm_fetch(query: str, lat: float, lon: float, radius_m: int) -> list[dict]:
                             lat=float(elat), lon=float(elon),
                             addr=tags.get("addr:full") or tags.get("addr:street") or "(no address)",
                             open_now=None,
-                            maps=_osm_maps_url(lat, lon, name),
+                            # Link to the actual result, not the center of the
+                            # user's saved search location.
+                            maps=_osm_maps_url(float(elat), float(elon), name),
                             dist_m=dist_m,
                         ))
                     if out:
@@ -532,7 +534,7 @@ def _osm_fetch(query: str, lat: float, lon: float, radius_m: int) -> list[dict]:
                     lat=elat, lon=elon,
                     addr=item.get("display_name", "(no address)"),
                     open_now=None,
-                    maps=_osm_maps_url(lat, lon, name),
+                    maps=_osm_maps_url(elat, elon, name),
                     dist_m=_haversine(lat, lon, elat, elon),
                 ))
             if out:

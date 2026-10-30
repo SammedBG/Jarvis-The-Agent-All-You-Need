@@ -55,7 +55,7 @@ with st.container(border=True):
                                value=current_aliases,
                                height=240, key="set_fast_path_aliases",
                                help="Example:\n"
-                                    "  chrome -> google-chrome\n"
+                                    "  browser -> chrome.exe\n"
                                     "  whatsapp -> https://web.whatsapp.com\n"
                                     "  coolapp -> /usr/bin/coolapp")
 

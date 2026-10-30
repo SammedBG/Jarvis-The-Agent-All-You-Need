@@ -49,7 +49,7 @@ Then talk to JARVIS by typing or clicking the mic button.
 Best for chat, approvals, tasks, memory, settings, activity, usage, documents.
 
 - Open `http://127.0.0.1:8000`
-- Type or use the mic button
+- Type normally, or enable hands-free voice mode once with the mic button. In voice mode, speech is sent automatically, replies are spoken aloud, and “yes” / “no” answer approval prompts. Microphone permission is required; Chrome or Edge is recommended.
 - Toggle read replies aloud in chat/tools
 - Use pages in sidebar: Chat, Today, Tasks, Memory, Documents, Activity, Usage, Settings
 
@@ -64,9 +64,19 @@ Older full-featured UI kept functional in `app_pages`.
 
 Best for "don't interrupt my work" voice control.
 
-- A tray icon appears; press **`Ctrl+Alt+J`** (or click the icon)
-- An overlay pops up on top of your current window
-- Click the mic, speak, JARVIS answers out loud
+Install the optional desktop dependencies in the same virtual environment as the API:
+
+```powershell
+# Windows
+.venv\Scripts\python.exe -m pip install -r requirements-desktop.txt
+.venv\Scripts\python.exe jarvis_desktop.py
+```
+
+On Linux, install `libportaudio2` first; then run the equivalent `.venv/bin/python -m pip install -r requirements-desktop.txt` and start `jarvis_desktop.py`.
+
+- The tray icon and voice overlay appear when JARVIS starts
+- Press **`Ctrl+Alt+J`** (or click the tray icon) to bring the overlay back later
+- Click and hold the mic, speak, and JARVIS answers out loud
 - Overlay fades away — your app underneath stays untouched
 - Works on both Linux and Windows
 
