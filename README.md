@@ -10,7 +10,7 @@ Works on **Linux** (tested on Ubuntu 24.04 GNOME Wayland) and **Windows**.
 
 - **Browser UI** (`uvicorn api.main:app`) — React app served by FastAPI with SSE streaming, sidebar, voice, approvals, tasks, memory, settings.
 - **Legacy Streamlit UI** (`streamlit run ui.py`) — still functional for parity and original UI.
-- **Desktop overlay** (`python jarvis_desktop.py`) — system tray app with global hotkey (`Ctrl+Alt+J`). Press it, speak into the mic, JARVIS answers out loud without you closing your current app.
+- **Desktop overlay** (`python jarvis_desktop.py`) — system tray app listens locally for “Hey JARVIS”; say the wake phrase and then your command without touching the screen.
 
 ## Quick start (one page)
 
@@ -76,7 +76,8 @@ On Linux, install `libportaudio2` first; then run the equivalent `.venv/bin/pyth
 
 - The tray icon and voice overlay appear when JARVIS starts
 - Press **`Ctrl+Alt+J`** (or click the tray icon) to bring the overlay back later
-- Click and hold the mic, speak, and JARVIS answers out loud
+- Say **“Hey JARVIS”**, then speak your command after the listening beep; no tap or hotkey is needed
+- Wake-word detection runs locally; only the command recording is sent to Groq for transcription
 - Overlay fades away — your app underneath stays untouched
 - Works on both Linux and Windows
 
@@ -137,9 +138,9 @@ JARVIS can read your unread email subjects/senders during the briefing. Uses Gma
 
 If you skip this, JARVIS just says "Email not configured, skip" and continues briefing.
 
-## "Hey JARVIS" wake word (experimental)
+## "Hey JARVIS" wake word
 
-Run `wake_word.py` in a separate terminal: it listens to your mic constantly, and on detecting the wake word records your voice, transcribes via Whisper, asks the agent, and speaks the reply. See `wake_word.py` for wake-word model name.
+The desktop overlay now starts its local wake-word listener automatically. Say “Hey JARVIS,” wait for the beep, then say your command. Wake detection stays on-device; the captured command is sent to Groq Whisper for transcription.
 
 ## Habits (daily check-ins)
 

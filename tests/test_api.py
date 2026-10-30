@@ -80,6 +80,9 @@ def _setup():
         if mode == "error":
             yield {"type": "error", "kind": "rate_limit", "message": "Rate limit reached for model x tokens per day (TPD): try again in 2s"}
             return
+        if mode == "limit":
+            yield {"type": "error", "kind": "limit", "message": "I hit my step limit - try a simpler request."}
+            return
         if mode == "approval":
             yield {"type": "pending", "actions": [{"name": "add_task", "args": {"title": "secret"}, "why": "test", "origin": "web"}]}
             return
@@ -239,6 +242,11 @@ def test_sse_error_event_friendly():
     assert "Daily limit" in err["message"] or "Daily" in err["message"] or True
     assert "Rate limit" not in err["message"]  # friendly (no raw)
     print("error event types:", types, "| msg:", err["message"][:60])
+    agent_mod._fake_mode = "limit"
+    r = client.post("/api/chat", json={"thread_id": "step-limit", "message": "hi"}, headers={"X-CSRF-Token": csrf})
+    limit_events = [json.loads(l[6:]) for l in r.text.splitlines() if l.startswith("data: ")]
+    limit_error = next(e for e in limit_events if e["type"] == "error")
+    assert "reasoning-step limit" in limit_error["message"]
     agent_mod._fake_mode = "ok"
 
 

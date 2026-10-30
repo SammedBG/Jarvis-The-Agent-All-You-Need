@@ -147,7 +147,55 @@ def test_osm_result_map_link_points_to_place(monkeypatch):
     places = P._osm_fetch("coffee", 12.91, 77.61, 5000)
 
     assert len(places) == 1
-    assert "mlat=12.918039&mlon=77.614084" in places[0]["_maps"]
+    assert places[0]["_maps"].endswith("/node/7")
+    assert "12.918039" not in places[0]["_maps"]
+
+
+def test_osm_pub_and_hotel_queries_use_distinct_categories(monkeypatch):
+    queries = []
+
+    class Response:
+        status_code = 200
+
+        def __init__(self, elements):
+            self.elements = elements
+
+        @staticmethod
+        def raise_for_status():
+            pass
+
+        def json(self):
+            return {"elements": self.elements}
+
+    def post(_url, data, **_kwargs):
+        queries.append(data)
+        if '["amenity"="pub"]' in data:
+            return Response([{
+                "type": "node", "id": 8, "lat": 12.92, "lon": 77.61,
+                "tags": {"name": "The Local Pub", "amenity": "pub"},
+            }])
+        if '["tourism"="hotel"]' in data:
+            return Response([{
+                "type": "node", "id": 9, "lat": 12.93, "lon": 77.62,
+                "tags": {"name": "City Hotel", "tourism": "hotel"},
+            }, {
+                "type": "way", "id": 10, "lat": 12.93, "lon": 77.63,
+                "tags": {"name": "2nd Cross Road", "tourism": "hotel"},
+            }])
+        return Response([])
+
+    monkeypatch.setattr(P, "_rate_limit_1s", lambda: None)
+    monkeypatch.setattr(P.requests, "post", post)
+
+    pubs = P._osm_fetch("best pubs near me", 12.91, 77.60, 3000)
+    hotels = P._osm_fetch("hotels near me", 12.91, 77.60, 3000)
+
+    assert [place["name"] for place in pubs] == ["The Local Pub"]
+    assert pubs[0]["category"] == "amenity=pub"
+    assert [place["name"] for place in hotels] == ["City Hotel"]
+    assert hotels[0]["category"] == "tourism=hotel"
+    assert any('["amenity"="pub"]' in query for query in queries)
+    assert any('["tourism"="hotel"]' in query for query in queries)
 
 
 if __name__ == "__main__":

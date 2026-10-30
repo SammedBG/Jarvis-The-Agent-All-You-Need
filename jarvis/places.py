@@ -48,8 +48,8 @@ def get_my_location() -> str:
         raw = get_setting(LOCATION_KEY, "").strip()
         if raw:
             v = json.loads(raw)
-            return f"Saved location: {v.get('label','(label unknown)')} " \
-                   f"({round(v['lat'], 2)}, {round(v['lon'], 2)})."
+            return (f"Saved location: {v.get('label','(label unknown)')}. "
+                    "Nearby searches use this saved point, not live GPS.")
     except Exception:
         pass
     try:
@@ -85,8 +85,7 @@ def save_location(label: str) -> str:
         set_state("places_location_asked", False)
     except Exception:
         pass
-    return f"Saved location {label} (this is stored; coords rounded on display: " \
-           f"{round(lat, 2)}, {round(lon, 2)})."
+    return f"Saved location {label}. Nearby searches will use this saved point, not live GPS."
 
 
 def _parse_maps_url(url: str):
@@ -356,31 +355,41 @@ def _foursquare_fetch(query: str, lat: float, lon: float, radius_m: int) -> list
 
 
 def _osm_fetch(query: str, lat: float, lon: float, radius_m: int) -> list[dict]:
-    # Map user query to OSM amenity/shop categories heuristically; "" -> all.
+    # OSM uses different tags for hospitality businesses and lodging. Keep
+    # these categories distinct: a pub search must never fall back to restaurants.
     amenity_map = {
-        "cafe": "cafe", "coffee": "cafe", "restaurant": "restaurant",
-        "pharmacy": "pharmacy", "atm": "atm", "petrol": "fuel",
-        "gas": "fuel", "supermarket": "supermarket", "bar": "bar", "bakery": "bakery",
-        "pizza": "restaurant", "burger": "fast_food", "mosque": "place_of_worship",
-        "temple": "place_of_worship", "hospital": "hospital", "park": "park",
-        "parking": "parking", "bank": "bank", "laundry": "laundry",
-        "gym": "gym", "salon": "hairdresser", "hospital": "hospital",
-        "metro": "metro", "subway": "metro", "underground": "metro",
-        "train station": "train_station", "railway station": "train_station",
-        "bus station": "bus_station", "bus stop": "bus_stop",
-        "station": "train_station",
-        "movie theater": "cinema", "cinema": "cinema", "theater": "cinema",
-        "theatre": "cinema", "multiplex": "cinema",
+        "restaurant": "amenity=restaurant", "cafe": "amenity=cafe",
+        "coffee": "amenity=cafe", "pharmacy": "amenity=pharmacy",
+        "atm": "amenity=atm", "petrol": "amenity=fuel", "gas": "amenity=fuel",
+        "supermarket": "shop=supermarket", "bar": "amenity=bar",
+        "pub": "amenity=pub", "bakery": "shop=bakery",
+        "pizza": "amenity=restaurant", "burger": "amenity=fast_food",
+        "mosque": "amenity=place_of_worship", "temple": "amenity=place_of_worship",
+        "hospital": "amenity=hospital", "park": "leisure=park",
+        "parking": "amenity=parking", "bank": "amenity=bank",
+        "laundry": "amenity=laundry", "gym": "leisure=fitness_centre",
+        "salon": "shop=hairdresser", "hotel": "tourism=hotel",
+        "motel": "tourism=motel", "hostel": "tourism=hostel",
+        "guest house": "tourism=guest_house", "nightclub": "amenity=nightclub",
+        "night club": "amenity=nightclub",
+        "metro": "railway=station", "subway": "railway=station",
+        "underground": "railway=station", "train station": "railway=station",
+        "railway station": "railway=station", "bus station": "amenity=bus_station",
+        "bus stop": "highway=bus_stop", "station": "railway=station",
+        "movie theater": "amenity=cinema", "cinema": "amenity=cinema",
+        "theater": "amenity=cinema", "theatre": "amenity=cinema",
+        "multiplex": "amenity=cinema",
     }
     railway_station_kw = {"metro", "subway", "underground", "train station",
                           "railway station", "bus station", "bus stop", "station"}
     q = (query or "").lower()
-    amenity = "restaurant"
+    category = "amenity=restaurant"
     is_station_query = any(k in q for k in railway_station_kw)
-    # token-level + relaxed matching: ensures "veg restaurant"/"restaurants"/etc match
-    for k in amenity_map:
-        if k in q:
-            amenity = amenity_map[k]
+    # Match the most specific whole phrase first ("train station" before
+    # "station", "guest house" before generic categories); support plurals.
+    for k in sorted(amenity_map, key=len, reverse=True):
+        if re.search(rf"(?<!\w){re.escape(k)}s?(?!\w)", q):
+            category = amenity_map[k]
             break
     else:
         # fuzzy amenity extraction - 1-2 letter typos handled
@@ -388,25 +397,24 @@ def _osm_fetch(query: str, lat: float, lon: float, radius_m: int) -> list[dict]:
         for tok in q.split():
             matches = difflib.get_close_matches(tok, list(amenity_map), n=1, cutoff=0.75)
             if matches:
-                amenity = amenity_map[matches[0]]
+                category = amenity_map[matches[0]]
                 break
 
-    # Broader fallback terms if the specific amenity returns nothing
-    fallback_amenities = {"restaurant": ["cafe", "fast_food", "food_court"],
-                          "cafe": ["restaurant", "fast_food"],
-                          "pharmacy": [],
-                          "atm": ["bank"],
-                          "petrol": ["fuel"],
-                          "fuel": ["petrol"],
-                          "supermarket": ["convenience"],
-                          "bar": ["pub"],
-                          "bakery": ["cafe"],
-                          "hospital": ["clinic"],
-                          "gym": ["fitness_centre"],
-                          "salon": ["beauty_salon"],
-                          "metro": ["train_station"],
-                          "train_station": ["metro", "bus_station"],
-                          "cinema": ["theatre"]}.get(amenity, [])
+    # Broadening is permitted only within a genuinely similar place type.
+    # In particular, hotel has no restaurant fallback.
+    fallback_categories = {
+        "amenity=restaurant": ["amenity=cafe", "amenity=fast_food", "amenity=food_court"],
+        "amenity=cafe": ["amenity=restaurant", "amenity=fast_food"],
+        "amenity=atm": ["amenity=bank"],
+        "amenity=fuel": [], "shop=supermarket": ["shop=convenience"],
+        "amenity=bar": ["amenity=pub"], "amenity=pub": ["amenity=bar"],
+        "shop=bakery": ["amenity=cafe"], "amenity=hospital": ["amenity=clinic"],
+        "leisure=fitness_centre": ["leisure=sports_centre"],
+        "shop=hairdresser": ["shop=beauty"],
+        "railway=station": ["amenity=bus_station"],
+        "amenity=cinema": ["amenity=theatre"],
+    }
+    fallback_amenities = fallback_categories.get(category, [])
 
     _OSM_ENDPOINTS = ["https://overpass-api.de/api/interpreter",
                       "https://overpass.kumi.systems/api/interpreter",
@@ -417,14 +425,15 @@ def _osm_fetch(query: str, lat: float, lon: float, radius_m: int) -> list[dict]:
     def _build_filters(am: str, r_m: int) -> str:
         if is_station_query:
             clauses = [
-                f'nwr["amenity"="{am}"](around:{int(r_m)},{lat},{lon});',
+                f'nwr["railway"="station"](around:{int(r_m)},{lat},{lon});',
                 f'nwr["railway"="station"](around:{int(r_m)},{lat},{lon});',
                 f'nwr["public_transport"="stop_position"](around:{int(r_m)},{lat},{lon});',
                 f'nwr["public_transport"="station"](around:{int(r_m)},{lat},{lon});',
                 f'node["highway"="bus_stop"](around:{int(r_m)},{lat},{lon});',
             ]
         else:
-            clauses = [f'nwr["amenity"="{am}"](around:{int(r_m)},{lat},{lon});']
+            tag, _, value = am.partition("=")
+            clauses = [f'nwr["{tag}"="{value}"](around:{int(r_m)},{lat},{lon});']
         return f'[out:json][timeout:4];({"".join(clauses)});out center body;'
 
     # Try primary amenity at requested radius, then broader fallbacks, then larger radius.
@@ -433,7 +442,7 @@ def _osm_fetch(query: str, lat: float, lon: float, radius_m: int) -> list[dict]:
     for r_m in (radius_m, min(radius_m * 2, 50000)):
         if overpass_dead:
             break
-        for am in [amenity] + fallback_amenities:
+        for am in [category] + fallback_amenities:
             if overpass_dead:
                 break
             subql = _build_filters(am, r_m)
@@ -453,6 +462,16 @@ def _osm_fetch(query: str, lat: float, lon: float, radius_m: int) -> list[dict]:
                         name = tags.get("name")
                         if not name:
                             continue
+                        name_lower = name.lower()
+                        if category == "tourism=hotel" and re.search(
+                            r"\b(?:road|street|highway|lane|junction|bus stop)\b$",
+                            name_lower,
+                        ):
+                            continue
+                        if category == "amenity=pub" and am == "amenity=bar" and re.search(
+                            r"\brestaurant\b", name_lower
+                        ):
+                            continue
                         elat = el.get("lat") or el.get("center", {}).get("lat")
                         elon = el.get("lon") or el.get("center", {}).get("lon")
                         if elat is None or elon is None:
@@ -471,6 +490,14 @@ def _osm_fetch(query: str, lat: float, lon: float, radius_m: int) -> list[dict]:
                             )
                             if not is_transport:
                                 continue
+                        place_category = next(
+                            (
+                                f"{key}={tags[key]}"
+                                for key in ("amenity", "tourism", "shop", "leisure")
+                                if tags.get(key)
+                            ),
+                            "",
+                        )
                         dist_m = _haversine(lat, lon, float(elat), float(elon))
                         out.append(_normalize(
                             "osm",
@@ -483,8 +510,12 @@ def _osm_fetch(query: str, lat: float, lon: float, radius_m: int) -> list[dict]:
                             open_now=None,
                             # Link to the actual result, not the center of the
                             # user's saved search location.
-                            maps=_osm_maps_url(float(elat), float(elon), name),
+                            maps=_osm_maps_url(
+                                float(elat), float(elon), name,
+                                osm_type=el.get("type"), osm_id=el.get("id"),
+                            ),
                             dist_m=dist_m,
+                            category=place_category,
                         ))
                     if out:
                         return out
@@ -496,7 +527,8 @@ def _osm_fetch(query: str, lat: float, lon: float, radius_m: int) -> list[dict]:
     UA = "JARVIS-assistant/1.0 (personal use)"
     try:
         _rate_limit_1s()
-        search_q = f"{amenity} near {lat},{lon}"
+        search_term = category.split("=", 1)[-1].replace("_", " ")
+        search_q = f"{search_term} near {lat},{lon}"
         if is_station_query:
             search_q = f"{q} near {lat},{lon}"
         r = requests.get("https://nominatim.openstreetmap.org/search",
@@ -509,6 +541,26 @@ def _osm_fetch(query: str, lat: float, lon: float, radius_m: int) -> list[dict]:
             out = []
             for item in (j or [])[:10]:
                 name = item.get("display_name", "").split(",")[0] or "(unnamed)"
+                osm_class = (item.get("class") or "").lower()
+                osm_type = (item.get("type") or "").lower()
+                name_lower = name.lower()
+                if category == "tourism=hotel" and re.search(
+                    r"\b(?:road|street|highway|lane|junction|bus stop)\b$",
+                    name_lower,
+                ):
+                    continue
+                if category == "amenity=pub" and osm_type == "bar" and re.search(
+                    r"\brestaurant\b", name_lower
+                ):
+                    continue
+                if category == "tourism=hotel" and not (
+                    osm_class == "tourism" and osm_type == "hotel"
+                ):
+                    continue
+                if category in {"amenity=pub", "amenity=bar"} and not (
+                    osm_class == "amenity" and osm_type in {"pub", "bar"}
+                ):
+                    continue
                 try:
                     elat = float(item["lat"]); elon = float(item["lon"])
                 except Exception:
@@ -516,8 +568,6 @@ def _osm_fetch(query: str, lat: float, lon: float, radius_m: int) -> list[dict]:
                 # For station queries, keep only actual station/transport results
                 if is_station_query:
                     display = item.get("display_name", "").lower()
-                    osm_class = (item.get("class", "") or "").lower()
-                    osm_type = (item.get("type", "") or "").lower()
                     is_transport = (
                         osm_class in ("railway", "station", "public_transport", "highway") or
                         any(k in display.split() for k in ("metro", "station", "subway",
@@ -534,8 +584,12 @@ def _osm_fetch(query: str, lat: float, lon: float, radius_m: int) -> list[dict]:
                     lat=elat, lon=elon,
                     addr=item.get("display_name", "(no address)"),
                     open_now=None,
-                    maps=_osm_maps_url(elat, elon, name),
+                    maps=_osm_maps_url(
+                        elat, elon, name,
+                        osm_type=item.get("osm_type"), osm_id=item.get("osm_id"),
+                    ),
                     dist_m=_haversine(lat, lon, elat, elon),
+                    category=f"{osm_class}={osm_type}" if osm_class and osm_type else "",
                 ))
             if out:
                 return out
@@ -571,7 +625,8 @@ def _rate_limit_1s() -> None:
     globals()["_LAST_NET"] = _t.time()
 
 
-def _normalize(source: str, name: str, rating, count, price, lat, lon, addr, open_now, maps, dist_m=None) -> dict:
+def _normalize(source: str, name: str, rating, count, price, lat, lon, addr,
+               open_now, maps, dist_m=None, category="") -> dict:
     has_rating = rating is not None
     return {
         "source": source,
@@ -585,11 +640,15 @@ def _normalize(source: str, name: str, rating, count, price, lat, lon, addr, ope
         "open_now": open_now,
         "_maps": maps or "n/a",
         "distance_m": dist_m if dist_m is not None else 0.0,
+        "category": category,
     }
 
 
-def _osm_maps_url(lat, lon, name) -> str:
-    return f"https://www.openstreetmap.org/?mlat={lat:.6f}&mlon={lon:.6f}"
+def _osm_maps_url(lat, lon, name, osm_type=None, osm_id=None) -> str:
+    if osm_type in {"node", "way", "relation"} and str(osm_id or "").isdigit():
+        return f"https://www.openstreetmap.org/{osm_type}/{int(osm_id)}"
+    from urllib.parse import quote
+    return "https://www.openstreetmap.org/search?query=" + quote(name or "place")
 
 
 def _maps_link(place_id, lat, lon, name, fsq_id=None) -> str:
@@ -694,9 +753,13 @@ def find_places(query: str, radius_m: int = 3000, open_now: bool = True,
 
     # build output with structured fields only; NEVER reviews
     lines = []
-    src_note = (f"Source: {source} ({len(ranked)} picks)"
-                + ("  -- NOTE: OpenStreetMap has no ratings/reviews;"
-                    " results sorted by distance only." if source == "osm" else ""))
+    src_note = (
+        f"Source: {source} live lookup at "
+        f"{datetime.now().astimezone().strftime('%H:%M %Z')} around saved location "
+        f"{_sanitize_place_text(label)} ({len(ranked)} picks)"
+        + (" -- OpenStreetMap has no ratings or reliable opening hours; "
+           "results are ranked by distance." if source == "osm" else "")
+    )
     lines.append(src_note)
     for p in ranked[:limit]:
         price = p.get("price_level")
@@ -706,9 +769,10 @@ def find_places(query: str, radius_m: int = 3000, open_now: bool = True,
         status = "open" if p.get("open_now") is True else ("closed" if p.get("open_now") is False else "?")
         rating_s = "-" if rating is None else f"{rating}"
         count_s = "-" if p.get("review_count") is None else p.get("review_count")
+        category = p.get("category", "")
+        category_s = f" [{category.split('=', 1)[-1]}]" if category else ""
         lines.append(
-            f"{lines[-1] if False else ''}" if False else
-            f"\u2022 {p['name']}  \u2014 {rating_s}⭐ ({count_s} reviews), "
+            f"\u2022 {p['name']}{category_s}  \u2014 {rating_s}⭐ ({count_s} reviews), "
             f"{dist}m, {status}{' ' + price_s if price_s else ''}\n"
             f"  {p['addr']}\n"
             f"  {p['_maps']}")

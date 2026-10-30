@@ -20,6 +20,7 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
+import time
 import wave
 from pathlib import Path
 
@@ -29,7 +30,7 @@ try:
     import numpy as np
     import sounddevice as sd
     from PyQt6.QtWidgets import (
-        QApplication, QSystemTrayIcon, QMenu, QWidget, QVBoxLayout, QPushButton,
+        QApplication, QSystemTrayIcon, QMenu, QWidget, QVBoxLayout,
         QLabel, QFrame, QHBoxLayout, QGraphicsDropShadowEffect,
     )
     from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, pyqtSignal, QThread, QPoint
@@ -57,7 +58,11 @@ import jarvis.app_reminders as app_reminders
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 SAMPLE_RATE = 16000
-RECORD_SECONDS = 6
+RECORD_SECONDS = 8
+WAKE_PHRASE = "Hey JARVIS"
+WAKE_THRESHOLD = 0.5
+WAKE_CONFIRM_CHUNKS = 2
+WAKE_CHUNK_SAMPLES = 1280  # 80 ms at 16 kHz
 THREAD_ID = "desktop-jarvis"
 
 HOTKEY = "<ctrl>+<alt>+j"   # global hotkey to summon JARVIS
@@ -94,6 +99,30 @@ def _record(seconds: int = RECORD_SECONDS) -> str:
         wf.setframerate(SAMPLE_RATE)
         wf.writeframes(recording.tobytes())
     return tmp
+
+
+def _load_wake_model():
+    """Load the local wake-word model. No microphone audio is sent while idle."""
+    import openwakeword
+    from openwakeword.model import Model
+    from openwakeword.utils import download_models
+
+    model_file = (
+        Path(openwakeword.__file__).parent
+        / "resources" / "models" / "hey_jarvis_v0.1.onnx"
+    )
+    if not model_file.is_file():
+        download_models(["hey_jarvis_v0.1"])
+    return Model(wakeword_models=["hey_jarvis"], inference_framework="onnx")
+
+
+def _open_wake_stream():
+    return sd.InputStream(
+        samplerate=SAMPLE_RATE,
+        blocksize=WAKE_CHUNK_SAMPLES,
+        channels=1,
+        dtype="int16",
+    )
 
 
 def _speak(text: str) -> None:
@@ -179,6 +208,40 @@ class JarvisWorker(QThread):
             print(f"[jarvis_desktop] {e}")
 
 
+class WakeWordListener(QThread):
+    """Continuously detect the wake phrase locally, then hand off one command."""
+    status = pyqtSignal(str)
+    wake_detected = pyqtSignal()
+    error = pyqtSignal(str)
+
+    def run(self) -> None:
+        try:
+            self.status.emit("Loading local wake-word listener...")
+            model = _load_wake_model()
+            consecutive = 0
+            self.status.emit("Listening locally - say 'Hey JARVIS'")
+            with _open_wake_stream() as stream:
+                while not self.isInterruptionRequested():
+                    audio, _overflowed = stream.read(WAKE_CHUNK_SAMPLES)
+                    try:
+                        if tts.is_speaking():
+                            consecutive = 0
+                            continue
+                    except Exception:
+                        pass
+                    scores = model.predict(np.asarray(audio, dtype=np.int16).reshape(-1))
+                    score = float(scores.get("hey_jarvis", 0.0))
+                    consecutive = consecutive + 1 if score >= WAKE_THRESHOLD else 0
+                    if consecutive >= WAKE_CONFIRM_CHUNKS:
+                        # Close the continuous stream before command capture opens
+                        # the microphone again.
+                        break
+            if consecutive >= WAKE_CONFIRM_CHUNKS:
+                self.wake_detected.emit()
+        except Exception as exc:
+            self.error.emit(str(exc))
+
+
 # ---------------------------------------------------------------------------
 # overlay window (floating, always on top)
 # ---------------------------------------------------------------------------
@@ -234,16 +297,14 @@ class Overlay(QWidget):
                 background: transparent;
                 padding: 8px;
             }
-            QPushButton#mic {
+            QLabel#mic {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
                     stop:0 #e94560, stop:1 #c1124a);
                 color: white;
                 border-radius: 44px;
                 font-size: 20pt;
                 font-weight: bold;
-            }
-            QPushButton#mic:pressed {
-                background: #c1124a;
+                padding: 10px;
             }
         """)
         if not sys.platform.startswith("win"):
@@ -259,11 +320,10 @@ class Overlay(QWidget):
         self.title = QLabel("JARVIS", objectName="title")
         self.title.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        self.mic = QPushButton("🎤 Hold to speak", objectName="mic")
-        self.mic.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.mic.pressed.connect(self._start_listen)
+        self.mic = QLabel("🎙 Say 'Hey JARVIS'", objectName="mic")
+        self.mic.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        self.status = QLabel("JARVIS online and ready - hold the mic to speak", objectName="status")
+        self.status = QLabel("Starting hands-free voice...", objectName="status")
         self.status.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.result_label = QLabel("", objectName="result")
@@ -286,13 +346,51 @@ class Overlay(QWidget):
         self.worker.error.connect(self._show_error)
         self.worker.finished.connect(self._worker_finished)
         self.worker.finished_speaking.connect(self._auto_hide)
+        self.wake_listener: WakeWordListener | None = None
 
-    def _start_listen(self) -> None:
+    def start_wake_listener(self) -> None:
+        if self.worker.isRunning() or (self.wake_listener and self.wake_listener.isRunning()):
+            return
+        self.mic.setText("🎙 Say 'Hey JARVIS'")
+        listener = WakeWordListener(self)
+        self.wake_listener = listener
+        listener.status.connect(self.status.setText)
+        listener.wake_detected.connect(self._on_wake_detected)
+        listener.error.connect(self._wake_listener_error)
+        listener.finished.connect(self._wake_listener_finished)
+        listener.finished.connect(listener.deleteLater)
+        listener.start()
+
+    def _wake_listener_finished(self) -> None:
+        self.wake_listener = None
+
+    def stop_wake_listener(self) -> None:
+        if self.wake_listener and self.wake_listener.isRunning():
+            self.wake_listener.requestInterruption()
+            self.wake_listener.wait(1500)
+
+    def _on_wake_detected(self) -> None:
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        self.status.setText("I heard you - say your command")
+        self.mic.setText("🎙 Listening for your command...")
+        QApplication.beep()
+        self._start_command()
+
+    def _wake_listener_error(self, detail: str) -> None:
+        self.status.setText("Hands-free listener needs attention")
+        self.result_label.setText(
+            "Check microphone permission and openwakeword installation. "
+            + (detail or "")[:160]
+        )
+        print(f"[jarvis_desktop] Wake-word listener failed: {detail}")
+
+    def _start_command(self) -> None:
         if self.worker.isRunning():
             return
-        self.mic.setEnabled(False)
         self.result_label.setText("")
-        self.status.setText("Listening...")
+        self.status.setText("Listening for your command...")
         self.worker.start()
 
     def _show_result(self, user_text: str, reply: str) -> None:
@@ -305,7 +403,8 @@ class Overlay(QWidget):
         self.result_label.setText((detail or "Check microphone, GROQ_API_KEY, and network.")[:240])
 
     def _worker_finished(self) -> None:
-        self.mic.setEnabled(True)
+        self.mic.setText("🎙 Say 'Hey JARVIS'")
+        QTimer.singleShot(300, self.start_wake_listener)
 
     def _auto_hide(self) -> None:
         self.hide()
@@ -314,7 +413,7 @@ class Overlay(QWidget):
         self.show()
         self.raise_()
         self.activateWindow()
-        self.status.setText("JARVIS online and ready - hold the mic to speak")
+        self.status.setText("JARVIS is hands-free - say 'Hey JARVIS'")
         self.result_label.setText("")
 
 
@@ -342,6 +441,7 @@ class JarvisApp:
         self.tray.show()
 
         self.overlay = Overlay()
+        self.overlay.start_wake_listener()
 
         # global hotkey (best effort - may not grab on Wayland)
         self._setup_hotkey()
@@ -399,6 +499,7 @@ class JarvisApp:
             self._show_overlay()
 
     def _quit(self) -> None:
+        self.overlay.stop_wake_listener()
         self.tray.hide()
         self.app.quit()
 
@@ -415,7 +516,7 @@ def main() -> None:
 
     app = JarvisApp()
     greeting = _startup_greeting()
-    app.overlay.status.setText(greeting)
+    app.overlay.result_label.setText(greeting)
     app.run()
 
 
